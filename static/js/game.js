@@ -129,6 +129,14 @@ function renderBoard() {
 
   const svg = document.getElementById('board-svg');
   svg.innerHTML = '';
+  
+  // Set SVG viewBox and dimensions to match the board scaling
+  svg.setAttribute('viewBox', '0 0 1024 683');
+  svg.setAttribute('width', boardScale.imgW);
+  svg.setAttribute('height', boardScale.imgH);
+  svg.style.position = 'absolute';
+  svg.style.left = boardScale.imgX + 'px';
+  svg.style.top = boardScale.imgY + 'px';
 
   const cities = BOARD_DATA.cities;
   const routes = BOARD_DATA.routes;
@@ -140,22 +148,21 @@ function renderBoard() {
     const c2 = cities[route.city2];
     if (!c1 || !c2) continue;
 
-    const p1 = boardPx(c1[0], c1[1]);
-    const p2 = boardPx(c2[0], c2[1]);
-
     const segData = BOARD_DATA.route_segments && BOARD_DATA.route_segments[route.id];
     let segments;
+    
     if (segData && segData.length === route.length) {
-      const dx = p2.x - p1.x, dy = p2.y - p1.y, dist = Math.sqrt(dx*dx + dy*dy);
-      const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+      // Use explicit segment data (in original 1024×683 board coords)
+      const dx = c2[0] - c1[0], dy = c2[1] - c1[1];
+      const dist = Math.sqrt(dx*dx + dy*dy);
       const segW = (dist / route.length) * 0.78;
-      const segH = 8 * boardScale.x;
-      segments = segData.map(([bx, by]) => {
-        const p = boardPx(bx, by);
-        return { x: p.x - segW/2, y: p.y - segH/2, w: segW, h: segH, angle, cx: p.x, cy: p.y };
+      const segH = 8;
+      segments = segData.map(([bx, by, segAngle]) => {
+        return { x: bx - segW/2, y: by - segH/2, w: segW, h: segH, angle: segAngle, cx: bx, cy: by };
       });
     } else {
-      segments = buildRouteSegments(p1, p2, route.length, route.side, route.color);
+      // Fallback: linear interpolation (board space, not screen space)
+      segments = buildRouteSegments(c1, c2, route.length, route.side, route.color);
     }
     const claimedBy = claimed[String(route.id)];
 
@@ -193,11 +200,10 @@ function renderBoard() {
 
   // Draw city circles
   for (const [cityName, coords] of Object.entries(cities)) {
-    const p = boardPx(coords[0], coords[1]);
     const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-    circle.setAttribute('cx', p.x);
-    circle.setAttribute('cy', p.y);
-    circle.setAttribute('r', 5 * boardScale.x);
+    circle.setAttribute('cx', coords[0]);
+    circle.setAttribute('cy', coords[1]);
+    circle.setAttribute('r', 5);
     circle.setAttribute('fill', '#1a1512');
     circle.setAttribute('stroke', '#c8a84b');
     circle.setAttribute('stroke-width', 1.5);
@@ -205,9 +211,9 @@ function renderBoard() {
     svg.appendChild(circle);
 
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('x', p.x);
-    text.setAttribute('y', p.y + 10 * boardScale.y);
-    text.setAttribute('font-size', Math.max(6, 7 * boardScale.x));
+    text.setAttribute('x', coords[0]);
+    text.setAttribute('y', coords[1] + 10);
+    text.setAttribute('font-size', 7);
     text.setAttribute('fill', '#ffffff');
     text.setAttribute('stroke', '#000');
     text.setAttribute('stroke-width', '2');
@@ -222,27 +228,28 @@ function renderBoard() {
 }
 
 function buildRouteSegments(p1, p2, length, side, color) {
-  const dx = p2.x - p1.x;
-  const dy = p2.y - p1.y;
+  // p1 and p2 are [x, y] arrays in board space (1024x683)
+  const dx = p2[0] - p1[0];
+  const dy = p2[1] - p1[1];
   const dist = Math.sqrt(dx * dx + dy * dy);
   const angle = Math.atan2(dy, dx) * 180 / Math.PI;
 
   const segW = (dist / length) * 0.78;
-  const segH = 8 * boardScale.x;
+  const segH = 8;
   const gap = (dist / length) * 0.22;
 
   // Perpendicular offset for double routes
   const perpX = -dy / dist;
   const perpY = dx / dist;
-  const offsetDist = side === 0 ? -4 * boardScale.x : 4 * boardScale.x;
+  const offsetDist = side === 0 ? -4 : 4;
   const offX = perpX * offsetDist;
   const offY = perpY * offsetDist;
 
   const segments = [];
   for (let i = 0; i < length; i++) {
     const t = (i + 0.5) / length;
-    const cx = p1.x + dx * t + offX;
-    const cy = p1.y + dy * t + offY;
+    const cx = p1[0] + dx * t + offX;
+    const cy = p1[1] + dy * t + offY;
     segments.push({
       x: cx - segW / 2,
       y: cy - segH / 2,
