@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+{% block title %}Lobby — {{ game.code }}{% endblock %}
+
+{% block body %}
+<div class="lobby-bg">
+  <div class="lobby-container">
+
+    <div class="lobby-header">
+      <h1 class="lobby-title">TICKET TO RIDE</h1>
+      <div class="lobby-subtitle">Game Lobby</div>
+    </div>
+
+    <!-- Share Code -->
+    <div class="code-box">
+      <div class="code-label">SHARE THIS CODE WITH FRIENDS</div>
+      <div class="code-display" id="game-code">{{ game.code }}</div>
+      <button class="copy-btn" id="copy-btn" title="Copy link">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+        </svg>
+        Copy Link
+      </button>
+      <div id="copy-feedback" class="copy-feedback hidden">Link copied!</div>
+    </div>
+
+    <!-- Players List -->
+    <div class="lobby-players">
+      <div class="section-title">PLAYERS (<span id="player-count">{{ game.players|length }}</span> / {{ game.max_players }})</div>
+      <div id="player-list" class="player-list">
+        {% for p in game.players %}
+        <div class="player-entry" data-id="{{ p.id }}">
+          <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280'}[p.color] }};"></div>
+          <span class="player-name">{{ p.name }}</span>
+          {% if p.is_host %}<span class="host-badge">HOST</span>{% endif %}
+          {% if p.id == player.id %}<span class="you-badge">YOU</span>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Rules Summary -->
+    <div class="lobby-rules">
+      <div class="section-title">HOW TO PLAY</div>
+      <ul class="rules-list">
+        <li>On your turn: <strong>draw 2 train cards</strong>, <strong>claim a route</strong>, or <strong>draw destination tickets</strong>.</li>
+        <li>Claim routes by playing matching colored cards equal to route length.</li>
+        <li>Locomotives are wild cards — usable as any color.</li>
+        <li>Complete destination tickets to earn bonus points; incomplete ones cost points.</li>
+        <li>Game ends when a player has ≤2 trains left. Everyone gets one final turn.</li>
+        <li>10-point bonus for the player with the <strong>Longest Continuous Path</strong>.</li>
+      </ul>
+    </div>
+
+    <!-- Route scoring reminder -->
+    <div class="scoring-table">
+      <div class="section-title">ROUTE SCORING</div>
+      <div class="score-chips">
+        <div class="score-chip"><span>1</span><span>1 pt</span></div>
+        <div class="score-chip"><span>2</span><span>2 pts</span></div>
+        <div class="score-chip"><span>3</span><span>4 pts</span></div>
+        <div class="score-chip"><span>4</span><span>7 pts</span></div>
+        <div class="score-chip"><span>5</span><span>10 pts</span></div>
+        <div class="score-chip"><span>6</span><span>15 pts</span></div>
+      </div>
+    </div>
+
+    <!-- Start / Wait message -->
+    <div class="lobby-actions">
+      {% if player.is_host %}
+      <button id="start-btn" class="btn-start">Start Game</button>
+      <div class="start-hint">Minimum 2 players required.</div>
+      {% else %}
+      <div class="waiting-msg">
+        <div class="spinner"></div>
+        Waiting for the host to start the game…
+      </div>
+      {% endif %}
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const GAME_CODE = "{{ game.code }}";
+const IS_HOST = {{ 'true' if player.is_host else 'false' }};
+const PLAYER_ID = {{ player.id }};
+
+const COLOR_HEX = {
+  blue: '#3B82F6', red: '#EF4444', green: '#22C55E',
+  yellow: '#EAB308', black: '#6B7280'
+};
+
+const socket = io();
+
+socket.on('connect', () => {
+  socket.emit('join_lobby', { code: GAME_CODE });
+});
+
+socket.on('lobby_state', (data) => {
+  updatePlayerList(data.players);
+});
+
+socket.on('player_joined', (data) => {
+  updatePlayerList(data.players);
+});
+
+socket.on('game_started', (data) => {
+  window.location.href = '/game/' + data.code;
+});
+
+socket.on('error', (data) => {
+  alert(data.message);
+});
+
+function updatePlayerList(players) {
+  const list = document.getElementById('player-list');
+  document.getElementById('player-count').textContent = players.length;
+  list.innerHTML = players.map(p => `
+    <div class="player-entry">
+      <div class="player-dot" style="background:${COLOR_HEX[p.color] || '#888'};"></div>
+      <span class="player-name">${escapeHtml(p.name)}</span>
+      ${p.is_host ? '<span class="host-badge">HOST</span>' : ''}
+      ${p.id === PLAYER_ID ? '<span class="you-badge">YOU</span>' : ''}
+    </div>
+  `).join('');
+}
+
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.appendChild(document.createTextNode(text));
+  return div.innerHTML;
+}
+
+// Copy link
+document.getElementById('copy-btn').addEventListener('click', () => {
+  const url = window.location.origin + '/lobby/' + GAME_CODE;
+  navigator.clipboard.writeText(url).then(() => {
+    const fb = document.getElementById('copy-feedback');
+    fb.classList.remove('hidden');
+    setTimeout(() => fb.classList.add('hidden'), 2000);
+  });
+});
+
+// Start game (host only)
+if (IS_HOST) {
+  document.getElementById('start-btn').addEventListener('click', () => {
+    socket.emit('start_game', { code: GAME_CODE });
+  });
+}
+</script>
+{% endblock %}

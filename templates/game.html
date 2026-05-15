@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Ticket to Ride — Game{% endblock %}
+
+{% block head %}
+<style>
+  body { overflow: hidden; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="game-shell">
+
+  <!-- ===== LEFT SIDEBAR ===== -->
+  <aside class="sidebar left-sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">PLAYERS</div>
+      <div id="players-panel"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">FACE-UP CARDS</div>
+      <div id="face-up-cards" class="face-up-area"></div>
+      <button class="draw-blind-btn" id="draw-blind-btn" title="Draw blind from deck">
+        🂠 Draw from Deck
+        <span id="deck-count" class="deck-count">110</span>
+      </button>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">YOUR HAND</div>
+      <div id="hand-cards" class="hand-area"></div>
+    </div>
+  </aside>
+
+  <!-- ===== BOARD ===== -->
+  <main class="board-wrapper">
+    <div class="board-container" id="board-container">
+      <img id="board-img" src="{{ url_for('static', filename='images/board.png') }}"
+           alt="Ticket to Ride Board" draggable="false"/>
+      <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
+    </div>
+    <div id="status-bar" class="status-bar"></div>
+  </main>
+
+  <!-- ===== RIGHT SIDEBAR ===== -->
+  <aside class="sidebar right-sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">YOUR TICKETS</div>
+      <div id="tickets-panel" class="tickets-area"></div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">ACTIONS</div>
+      <div id="action-area">
+        <button class="action-btn" id="draw-tickets-btn">
+          📋 Draw Destination Tickets
+          <span id="dest-count" class="deck-count">30</span>
+        </button>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-label">ACTION LOG</div>
+      <div id="action-log" class="action-log"></div>
+    </div>
+  </aside>
+
+</div>
+
+<!-- ===== MODALS ===== -->
+
+<!-- Initial / Draw ticket selection modal -->
+<div id="ticket-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <h2 id="ticket-modal-title">Choose Destination Tickets</h2>
+    <p id="ticket-modal-desc" class="modal-desc"></p>
+    <div id="ticket-choices" class="ticket-choices"></div>
+    <div class="modal-footer">
+      <button class="btn-primary" id="ticket-confirm-btn">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<!-- Claim route modal (card selection) -->
+<div id="claim-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box">
+    <h2>Claim Route</h2>
+    <div id="claim-info" class="claim-info"></div>
+    <div id="card-selector" class="card-selector"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="claim-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="claim-confirm-btn">Claim</button>
+    </div>
+  </div>
+</div>
+
+<!-- Game Over modal -->
+<div id="gameover-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box wide">
+    <h2>🏆 Game Over!</h2>
+    <div id="final-scores" class="final-scores"></div>
+    <div class="modal-footer">
+      <a href="/" class="btn-primary">Play Again</a>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Board data injected from server ──────────────────────────────────────────
+const BOARD_DATA = {{ board_data | tojson }};
+const GAME_CODE   = "{{ game.code }}";
+const MY_PLAYER_ID = "{{ player.id }}";
+const MY_COLOR     = "{{ player.color }}";
+</script>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='js/game.js') }}"></script>
+{% endblock %}

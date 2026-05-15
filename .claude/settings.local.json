@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from PIL import Image; img = Image.open\\('assets/board.png'\\); print\\(img.size\\)\")",
+      "Bash(python3 -c \"from PIL import Image; img = Image.open\\('assets/board.png'\\); print\\(img.size\\)\")",
+      "Bash(pip --version)",
+      "Bash(psql --version)",
+      "Bash(python -m pip --version)",
+      "Bash(python -m pip list)"
+    ]
+  }
+}

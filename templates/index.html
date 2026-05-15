@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Ticket to Ride — Home{% endblock %}
+
+{% block body %}
+<div class="landing-bg">
+  <div class="landing-overlay"></div>
+
+  <div class="landing-content">
+    <div class="logo-area">
+      <div class="logo-subtitle">A CROSS-COUNTRY TRAIN ADVENTURE</div>
+      <h1 class="logo-title">Ticket<br/><span class="logo-to">to</span><br/>Ride</h1>
+      <div class="logo-stars">✦ ✦ ✦</div>
+    </div>
+
+    <div class="landing-panels">
+      <!-- Host Panel -->
+      <div class="panel" id="host-panel">
+        <div class="panel-header">
+          <div class="panel-icon">🚂</div>
+          <h2>Host a Game</h2>
+        </div>
+        <div class="panel-body">
+          <label>Your Name</label>
+          <input type="text" id="host-name" placeholder="Enter your name" maxlength="20" autocomplete="off"/>
+          <label>Max Players</label>
+          <div class="player-count-select">
+            {% for n in range(2, 6) %}
+            <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
+            {% endfor %}
+          </div>
+          <button class="btn-primary" id="host-btn">Create Game</button>
+        </div>
+      </div>
+
+      <div class="panel-divider"><span>OR</span></div>
+
+      <!-- Join Panel -->
+      <div class="panel" id="join-panel">
+        <div class="panel-header">
+          <div class="panel-icon">🎫</div>
+          <h2>Join a Game</h2>
+        </div>
+        <div class="panel-body">
+          <label>Your Name</label>
+          <input type="text" id="join-name" placeholder="Enter your name" maxlength="20" autocomplete="off"/>
+          <label>Game Code</label>
+          <input type="text" id="join-code" placeholder="6-character code" maxlength="6" autocomplete="off"
+                 style="text-transform:uppercase;letter-spacing:0.2em;font-size:1.3rem;text-align:center;"/>
+          <button class="btn-secondary" id="join-btn">Join Game</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="landing-error" class="error-msg hidden"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const joinCode = "{{ request.args.get('join', '') }}";
+if (joinCode) {
+  document.getElementById('join-code').value = joinCode;
+}
+
+let selectedMaxPlayers = 4;
+document.querySelectorAll('.count-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMaxPlayers = parseInt(btn.dataset.count);
+  });
+});
+
+function showError(msg) {
+  const el = document.getElementById('landing-error');
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
+document.getElementById('host-btn').addEventListener('click', async () => {
+  const name = document.getElementById('host-name').value.trim();
+  if (!name) { showError('Please enter your name.'); return; }
+  const res = await fetch('/create', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, max_players: selectedMaxPlayers })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    window.location.href = '/lobby/' + data.code;
+  } else {
+    showError(data.error || 'Failed to create game.');
+  }
+});
+
+document.getElementById('join-btn').addEventListener('click', async () => {
+  const name = document.getElementById('join-name').value.trim();
+  const code = document.getElementById('join-code').value.trim().toUpperCase();
+  if (!name) { showError('Please enter your name.'); return; }
+  if (code.length !== 6) { showError('Please enter a 6-character game code.'); return; }
+  const res = await fetch('/join', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, code })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    window.location.href = '/lobby/' + data.code;
+  } else {
+    showError(data.error || 'Failed to join game.');
+  }
+});
+
+['host-name', 'join-code', 'join-name'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      if (id.startsWith('host')) document.getElementById('host-btn').click();
+      else document.getElementById('join-btn').click();
+    }
+  });
+});
+</script>
+{% endblock %}
