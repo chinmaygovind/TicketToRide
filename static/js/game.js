@@ -7,6 +7,47 @@ let gameState = null;
 let pendingRouteId = null;
 
 // Card icon emoji map
+// Per-city label offsets [dx, dy] from city dot center.
+// Run scripts/label_debug.html to place labels, then paste the output here.
+const LABEL_OFFSETS = {
+  "Vancouver": [-26, -25],
+  "Seattle": [49, -6],
+  "Portland": [35, 18],
+  "San Francisco": [70, 6],
+  "Los Angeles": [-44, 10],
+  "Las Vegas": [0, 14],
+  "Salt Lake City": [-62, -18],
+  "Helena": [6, -53],
+  "Calgary": [-22, 18],
+  "Winnipeg": [-50, -4],
+  "Denver": [42, -20],
+  "Omaha": [41, -2],
+  "Duluth": [-36, -17],
+  "Sault St. Marie": [-24, -43],
+  "Kansas City": [-52, -18],
+  "Chicago": [27, 9],
+  "Saint Louis": [44, 4],
+  "Oklahoma City": [-44, 20],
+  "Dallas": [-33, -10],
+  "Houston": [-47, 0],
+  "Little Rock": [53, 5],
+  "New Orleans": [4, 10],
+  "Nashville": [44, -8],
+  "Atlanta": [34, -10],
+  "Raleigh": [44, -2],
+  "Charleston": [14, 13],
+  "Miami": [0, 14],
+  "Washington": [44, 5],
+  "Pittsburgh": [-48, -3],
+  "New York": [45, 2],
+  "Boston": [26, 3],
+  "Montreal": [42, -17],
+  "Toronto": [33, -17],
+  "Santa Fe": [-44, -4],
+  "Phoenix": [0, 14],
+  "El Paso": [-13, 16]
+};
+
 const CARD_ICON = {
   purple: '🟣', blue: '🔵', orange: '🟠', white: '⚪',
   green: '🟢', yellow: '🟡', black: '⚫', red: '🔴',
@@ -210,13 +251,29 @@ function renderBoard() {
     circle.classList.add('city-circle');
     svg.appendChild(circle);
 
+    const labelFontSize = 11;
+    const [ldx, ldy] = LABEL_OFFSETS[cityName] || [0, 14];
+    const labelX = coords[0] + ldx;
+    const labelY = coords[1] + ldy;
+    // Semi-transparent pill behind label so text is readable over routes
+    const estLabelW = cityName.length * 6.4;
+    const labelBg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+    labelBg.setAttribute('x', labelX - estLabelW / 2 - 2);
+    labelBg.setAttribute('y', labelY - 1);
+    labelBg.setAttribute('width', estLabelW + 4);
+    labelBg.setAttribute('height', labelFontSize + 3);
+    labelBg.setAttribute('fill', 'rgba(10, 7, 4, 0.58)');
+    labelBg.setAttribute('rx', '2');
+    labelBg.style.pointerEvents = 'none';
+    svg.appendChild(labelBg);
+
     const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-    text.setAttribute('x', coords[0]);
-    text.setAttribute('y', coords[1] + 10);
-    text.setAttribute('font-size', 7);
-    text.setAttribute('fill', '#ffffff');
-    text.setAttribute('stroke', '#000');
-    text.setAttribute('stroke-width', '2');
+    text.setAttribute('x', labelX);
+    text.setAttribute('y', labelY);
+    text.setAttribute('font-size', labelFontSize);
+    text.setAttribute('fill', '#f0e8d0');
+    text.setAttribute('stroke', '#1a1210');
+    text.setAttribute('stroke-width', '1.5');
     text.setAttribute('paint-order', 'stroke');
     text.setAttribute('text-anchor', 'middle');
     text.setAttribute('dominant-baseline', 'hanging');

@@ -346,7 +346,7 @@ def _broadcast_state(game: Game, code: str):
 
 
 @socketio.on("register_session")
-def on_register_session(data):
+def on_register_session(data=None):
     """Allow client to register its session key as a Socket.IO room for personal messages."""
     sk = get_session_key()
     join_room(sk)
