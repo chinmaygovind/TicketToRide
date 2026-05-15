@@ -1,3 +1,6 @@
+import eventlet
+eventlet.monkey_patch()
+
 import os
 import random
 import string
@@ -33,7 +36,7 @@ app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db.init_app(app)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="threading")
+socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 with app.app_context():
     db.create_all()
@@ -445,4 +448,5 @@ def on_get_all_tickets():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5001))
-    socketio.run(app, host="0.0.0.0", port=port, debug=True, use_reloader=True, log_output=True)
+    debug = os.environ.get("FLASK_ENV") == "development"
+    socketio.run(app, host="0.0.0.0", port=port, debug=debug, use_reloader=False, log_output=True)
