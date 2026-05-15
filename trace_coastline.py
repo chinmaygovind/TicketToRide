@@ -39,9 +39,12 @@ class CoastlineTracer:
         self.canvas_image = self.canvas.create_image(0, 0, anchor='nw')
         
         # Points lists for different features
+        # Note: lakes_points and rivers_points are now lists of separate polylines
+        # e.g., lakes_points = [[points for lake 1], [points for lake 2], ...]
         self.coastline_points = []
-        self.lakes_points = []
-        self.rivers_points = []
+        self.lakes_points = []  # List of separate lakes
+        self.rivers_points = []  # List of separate rivers
+        self.current_stroke = []  # Points being drawn for current lake/river
         self.mode = 'lakes'  # Start in lakes mode
         self.drawing = False
         
@@ -127,12 +130,25 @@ class CoastlineTracer:
             elif isinstance(data, dict):
                 # New format: {coastline, lakes, rivers}
                 self.coastline_points = data.get('coastline', [])
-                self.lakes_points = data.get('lakes', [])
-                self.rivers_points = data.get('rivers', [])
+                
+                # Handle lakes - could be flat list (old) or list of lists (new)
+                lakes_data = data.get('lakes', [])
+                if lakes_data and isinstance(lakes_data[0], list) and isinstance(lakes_data[0][0], (list, tuple)):
+                    self.lakes_points = lakes_data  # Already list of lists
+                elif lakes_data:
+                    self.lakes_points = []  # Empty, it was a flat list from old format
+                
+                # Handle rivers
+                rivers_data = data.get('rivers', [])
+                if rivers_data and isinstance(rivers_data[0], list) and isinstance(rivers_data[0][0], (list, tuple)):
+                    self.rivers_points = rivers_data  # Already list of lists
+                elif rivers_data:
+                    self.rivers_points = []  # Empty
+                
                 print(f"✓ Loaded existing trace:")
                 print(f"  - Coastline: {len(self.coastline_points)} points")
-                print(f"  - Lakes: {len(self.lakes_points)} points")
-                print(f"  - Rivers: {len(self.rivers_points)} points")
+                print(f"  - Lakes: {len(self.lakes_points)} polylines")
+                print(f"  - Rivers: {len(self.rivers_points)} polylines")
         except FileNotFoundError:
             pass  # No existing trace file
     
@@ -169,41 +185,45 @@ class CoastlineTracer:
             return (100, 200, 255, 180)  # Light blue
     
     def on_mouse_down(self, event):
-        """Start drawing"""
+        """Start drawing a new stroke"""
         self.drawing = True
+        self.current_stroke = []  # Start fresh
         x = event.x
         y = event.y
         if 0 <= x < 1024 and 0 <= y < 683:
-            points = self._get_current_points()
-            points.append((x, y))
+            self.current_stroke.append((x, y))
     
     def on_mouse_drag(self, event):
-        """Continue drawing line"""
+        """Continue drawing current stroke"""
         if not self.drawing:
             return
         
         x = event.x
         y = event.y
         if 0 <= x < 1024 and 0 <= y < 683:
-            points = self._get_current_points()
-            if len(points) > 0:
+            if len(self.current_stroke) > 0:
                 # Draw line from last point to current
-                last_x, last_y = points[-1]
+                last_x, last_y = self.current_stroke[-1]
                 color = self._get_mode_color(self.mode)
                 self.draw_obj.line([(last_x, last_y), (x, y)], fill=color, width=3)
             
-            points.append((x, y))
+            self.current_stroke.append((x, y))
             self._update_canvas_image()
     
     def on_mouse_up(self, event):
-        """Stop drawing"""
+        """Finish current stroke and save it"""
+        if self.drawing and len(self.current_stroke) > 1:
+            # Save completed stroke
+            points_list = self._get_current_points()
+            points_list.append(self.current_stroke[:])  # Add as separate polyline
         self.drawing = False
+        self.current_stroke = []
     
     def undo(self):
-        """Remove last point from current mode"""
+        """Remove last polyline from current mode"""
         points = self._get_current_points()
         if points:
-            points.pop()
+            points.pop()  # Remove last polyline
             self._redraw_all()
     
     def clear(self):
@@ -212,6 +232,7 @@ class CoastlineTracer:
             self.coastline_points = []
             self.lakes_points = []
             self.rivers_points = []
+            self.current_stroke = []
             self.draw_canvas = Image.new('RGBA', (1024, 683), (0, 0, 0, 0))
             self.draw_obj = ImageDraw.Draw(self.draw_canvas)
             self._update_canvas_image()
@@ -229,21 +250,23 @@ class CoastlineTracer:
                 x2, y2 = self.coastline_points[i + 1]
                 self.draw_obj.line([(x1, y1), (x2, y2)], fill=color, width=3)
         
-        # Redraw lakes
-        if len(self.lakes_points) > 1:
-            color = self._get_mode_color('lakes')
-            for i in range(len(self.lakes_points) - 1):
-                x1, y1 = self.lakes_points[i]
-                x2, y2 = self.lakes_points[i + 1]
-                self.draw_obj.line([(x1, y1), (x2, y2)], fill=color, width=2)
+        # Redraw lakes (each is a separate polyline)
+        color = self._get_mode_color('lakes')
+        for lake in self.lakes_points:
+            if len(lake) > 1:
+                for i in range(len(lake) - 1):
+                    x1, y1 = lake[i]
+                    x2, y2 = lake[i + 1]
+                    self.draw_obj.line([(x1, y1), (x2, y2)], fill=color, width=2)
         
-        # Redraw rivers
-        if len(self.rivers_points) > 1:
-            color = self._get_mode_color('rivers')
-            for i in range(len(self.rivers_points) - 1):
-                x1, y1 = self.rivers_points[i]
-                x2, y2 = self.rivers_points[i + 1]
-                self.draw_obj.line([(x1, y1), (x2, y2)], fill=color, width=1.5)
+        # Redraw rivers (each is a separate polyline)
+        color = self._get_mode_color('rivers')
+        for river in self.rivers_points:
+            if len(river) > 1:
+                for i in range(len(river) - 1):
+                    x1, y1 = river[i]
+                    x2, y2 = river[i + 1]
+                    self.draw_obj.line([(x1, y1), (x2, y2)], fill=color, width=1.5)
         
         self._update_canvas_image()
     
@@ -265,7 +288,9 @@ class CoastlineTracer:
         # Generate SVG with all traced features
         self._generate_svg_from_trace()
         
-        counts = f"Coastline: {len(self.coastline_points)} | Lakes: {len(self.lakes_points)} | Rivers: {len(self.rivers_points)}"
+        num_lakes = len(self.lakes_points)
+        num_rivers = len(self.rivers_points)
+        counts = f"Coastline: {len(self.coastline_points)} | Lakes: {num_lakes} | Rivers: {num_rivers}"
         messagebox.showinfo("Saved", f"All features saved!\n\n{counts}\n\n- coastline_trace.json\n- static/images/board.svg (updated)")
     
     def _generate_svg_from_trace(self):
@@ -276,16 +301,23 @@ class CoastlineTracer:
         # Create polygon from coastline points
         coastline_str = ' '.join([f'{x},{y}' for x, y in self.coastline_points])
         
-        # Create polylines for lakes and rivers
+        # Create separate polylines for each lake
         lakes_elements = ""
-        if len(self.lakes_points) > 1:
-            lakes_str = ' '.join([f'{x},{y}' for x, y in self.lakes_points])
-            lakes_elements = f'  <!-- Traced lakes -->\n  <polyline points="{lakes_str}" fill="#1a3a52" stroke="#2a5280" stroke-width="3" opacity="0.8"/>\n'
+        if self.lakes_points:
+            lakes_elements = '  <!-- Traced lakes -->\n'
+            for lake in self.lakes_points:
+                if len(lake) > 1:
+                    lake_str = ' '.join([f'{x},{y}' for x, y in lake])
+                    lakes_elements += f'  <polyline points="{lake_str}" fill="#1a3a52" stroke="#2a5280" stroke-width="3" opacity="0.8"/>\n'
         
+        # Create separate polylines for each river
         rivers_elements = ""
-        if len(self.rivers_points) > 1:
-            rivers_str = ' '.join([f'{x},{y}' for x, y in self.rivers_points])
-            rivers_elements = f'  <!-- Traced rivers -->\n  <polyline points="{rivers_str}" fill="none" stroke="#4a90e2" stroke-width="2" opacity="0.6" stroke-linecap="round"/>\n'
+        if self.rivers_points:
+            rivers_elements = '  <!-- Traced rivers -->\n'
+            for river in self.rivers_points:
+                if len(river) > 1:
+                    river_str = ' '.join([f'{x},{y}' for x, y in river])
+                    rivers_elements += f'  <polyline points="{river_str}" fill="none" stroke="#4a90e2" stroke-width="2" opacity="0.6" stroke-linecap="round"/>\n'
         
         svg_content = f'''<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 683" width="1024" height="683">
@@ -303,8 +335,8 @@ class CoastlineTracer:
         
         print(f"✓ Generated board.svg")
         print(f"  - Coastline: {len(self.coastline_points)} points")
-        print(f"  - Lakes: {len(self.lakes_points)} points")
-        print(f"  - Rivers: {len(self.rivers_points)} points")
+        print(f"  - Lakes: {len(self.lakes_points)} polylines")
+        print(f"  - Rivers: {len(self.rivers_points)} polylines")
 
 if __name__ == '__main__':
     root = tk.Tk()
