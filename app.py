@@ -228,6 +228,7 @@ def on_start_game(data):
     db.session.commit()
 
     socketio.emit("game_started", {"code": code}, to=code)
+    _run_bots(game, code)
 
 
 @socketio.on("join_game_room")
@@ -246,6 +247,42 @@ def on_join_game_room(data):
     pub["my_player_id"] = str(player.id)
     pub["my_color"] = player.color
     emit("game_state", pub)
+
+
+@socketio.on("add_bot")
+def on_add_bot(data):
+    code = data.get("code", "").upper()
+    sk = get_session_key()
+    game = Game.query.filter_by(code=code).first()
+    if not game or game.status != "waiting":
+        emit("error", {"message": "Cannot add bot now."})
+        return
+    player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if not player or not player.is_host:
+        emit("error", {"message": "Only the host can add bots."})
+        return
+    if len(game.players) >= game.max_players:
+        emit("error", {"message": "Game is full."})
+        return
+
+    bot_count = sum(1 for p in game.players if p.session_key.startswith("bot_"))
+    used_colors = {p.color for p in game.players}
+    available = [c for c in PLAYER_COLORS if c not in used_colors]
+    if not available:
+        emit("error", {"message": "No colors available."})
+        return
+
+    bot = Player(
+        game_id=game.id,
+        session_key=f"bot_{uuid.uuid4()}",
+        name=f"Bot {bot_count + 1}",
+        color=available[0],
+        turn_order=len(game.players),
+        is_host=False,
+    )
+    db.session.add(bot)
+    db.session.commit()
+    socketio.emit("player_joined", game.to_lobby_dict(), to=code)
 
 
 @socketio.on("keep_initial_tickets")
@@ -269,6 +306,7 @@ def on_keep_initial_tickets(data):
     game.state = state
     db.session.commit()
     _broadcast_state(game, code)
+    _run_bots(game, code)
 
 
 @socketio.on("draw_face_up")
@@ -329,12 +367,15 @@ def _player_action(code: str, action_fn):
     game.state = state
     db.session.commit()
     _broadcast_state(game, code)
+    _run_bots(game, code)
 
 
 def _broadcast_state(game: Game, code: str):
     """Send each player their personalized view of the game state."""
     state = game.state
     for p in game.players:
+        if p.session_key.startswith("bot_"):
+            continue  # bots have no socket connection
         pub = logic.get_public_state(state, str(p.id))
         pub["my_player_id"] = str(p.id)
         pub["my_color"] = p.color
@@ -343,6 +384,47 @@ def _broadcast_state(game: Game, code: str):
     # Also send a generic update to the room (for non-personal data like claimed routes)
     generic = logic.get_public_state(state, "")
     socketio.emit("game_state_update", generic, to=code)
+
+
+def _run_bots(game: Game, code: str):
+    """Auto-play any bot turns until the current player is human."""
+    for _ in range(100):  # safety cap
+        state = game.state
+        phase = state.get("phase")
+
+        if phase == "initial_tickets":
+            acted = False
+            for p in game.players:
+                if not p.session_key.startswith("bot_"):
+                    continue
+                pid = str(p.id)
+                ps = state["player_states"].get(pid, {})
+                pending = ps.get("pending_tickets", [])
+                if pending:
+                    logic.keep_initial_tickets(state, pid, pending)
+                    game.state = state
+                    db.session.commit()
+                    acted = True
+                    break
+            if not acted:
+                break
+
+        elif phase in ("main", "final_round"):
+            cur_pid = state["current_player_id"]
+            cur_player = next((p for p in game.players if str(p.id) == cur_pid), None)
+            if cur_player and cur_player.session_key.startswith("bot_"):
+                for _ in range(2):
+                    result = logic.draw_blind(state, cur_pid)
+                    if not result["ok"]:
+                        break
+                game.state = state
+                db.session.commit()
+            else:
+                break
+        else:
+            break
+
+    _broadcast_state(game, code)
 
 
 @socketio.on("register_session")

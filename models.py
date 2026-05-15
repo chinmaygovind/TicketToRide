@@ -57,4 +57,5 @@ class Player(db.Model):
             "color": self.color,
             "turn_order": self.turn_order,
             "is_host": self.is_host,
+            "is_bot": self.session_key.startswith("bot_"),
         }

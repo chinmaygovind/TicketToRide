@@ -62,7 +62,7 @@ const CARD_BG = {
   yellow:     'linear-gradient(135deg, #ca8a04, #713f12)',
   black:      'linear-gradient(135deg, #374151, #111827)',
   red:        'linear-gradient(135deg, #dc2626, #7f1d1d)',
-  locomotive: 'linear-gradient(135deg, #d97706, #92400e)',
+  locomotive: 'linear-gradient(160deg, #ef4444 0%, #f97316 18%, #eab308 38%, #22c55e 58%, #3b82f6 78%, #8b5cf6 100%)',
 };
 
 // Player color hex map (should match server-side)
@@ -125,7 +125,12 @@ function renderAll() {
   renderActionButtons();
   if (gameState.phase === 'ended') showGameOver();
   const ticketModal = document.getElementById('ticket-modal');
-  if (!ticketModal.classList.contains('hidden')) return; // don't reset if already open
+  if (!ticketModal.classList.contains('hidden')) {
+    // If modal is open but pending tickets are gone (e.g. game_state_update raced ahead),
+    // close it so the fresh game_state can cleanly re-evaluate.
+    if (!hasPendingTickets()) closeModal('ticket-modal');
+    return;
+  }
   if (hasPendingTickets()) openInitialTicketsModal();
 }
 
@@ -217,6 +222,10 @@ function renderBoard() {
       rect.setAttribute('transform', `rotate(${seg.angle}, ${seg.cx}, ${seg.cy})`);
       rect.setAttribute('rx', '2');
 
+      rect.dataset.routeId = route.id;
+      rect.addEventListener('mouseenter', () => highlightRoute(route.id));
+      rect.addEventListener('mouseleave', () => unhighlightRoute(route.id));
+
       if (claimedBy) {
         const owner = gameState.players[claimedBy];
         const ownerColor = owner ? PLAYER_HEX[owner.color] : '#888';
@@ -231,7 +240,6 @@ function renderBoard() {
         rect.setAttribute('stroke', 'rgba(255,255,255,0.3)');
         rect.setAttribute('stroke-width', '1');
         rect.classList.add('route-seg');
-        rect.dataset.routeId = route.id;
         rect.addEventListener('click', () => onRouteClick(route.id));
       }
 
@@ -353,9 +361,11 @@ function renderFaceUpCards() {
   const faceUp = gameState.face_up || [];
   area.innerHTML = faceUp.map((color, i) => {
     if (!color) return `<div class="train-card" style="background:#222;border-style:dashed;"></div>`;
+    const label = color === 'locomotive' ? 'LOCO' : color.toUpperCase();
     return `<div class="train-card" style="background:${CARD_BG[color] || '#444'};"
                  data-slot="${i}" onclick="onDrawFaceUp(${i})" title="${color}">
-              <div class="card-label">${color.toUpperCase()}</div>
+              <span class="card-train-emoji">🚂</span>
+              <div class="card-label">${label}</div>
             </div>`;
   }).join('');
 
@@ -376,8 +386,9 @@ function renderHand() {
     .map(c => `
       <div class="hand-card-chip" style="background:${CARD_BG[c]};"
            data-color="${c}">
+        <span class="chip-icon">🚂</span>
         <span class="chip-count">${hand[c]}</span>
-        <span class="chip-name">${c.toUpperCase()}</span>
+        <span class="chip-name">${c === 'locomotive' ? 'LOCO' : c.toUpperCase()}</span>
       </div>`)
     .join('');
 }
@@ -504,6 +515,20 @@ document.getElementById('draw-tickets-btn').addEventListener('click', () => {
   socket.emit('draw_destination_tickets', { code: GAME_CODE });
 });
 
+// ─── Route hover highlight ────────────────────────────────────────────────────
+
+function highlightRoute(routeId) {
+  document.querySelectorAll(`[data-route-id="${routeId}"]`).forEach(el => {
+    el.classList.add('route-hover');
+  });
+}
+
+function unhighlightRoute(routeId) {
+  document.querySelectorAll(`[data-route-id="${routeId}"]`).forEach(el => {
+    el.classList.remove('route-hover');
+  });
+}
+
 // ─── Route click → claim modal ───────────────────────────────────────────────
 
 function onRouteClick(routeId) {
@@ -602,7 +627,7 @@ function openInitialTicketsModal() {
     `Choose which tickets to keep (minimum ${minKeep}).`;
 
   const tickets = me.pending_tickets;
-  let selected = new Set(tickets.map(t => t.id));  // default: keep all
+  let selected = new Set();  // default: none selected
 
   function refreshTicketChoices() {
     const choicesEl = document.getElementById('ticket-choices');
@@ -619,13 +644,16 @@ function openInitialTicketsModal() {
       el.addEventListener('click', () => {
         const id = parseInt(el.dataset.id);
         if (selected.has(id)) {
-          if (selected.size > minKeep) selected.delete(id);
+          selected.delete(id);
         } else {
           selected.add(id);
         }
         refreshTicketChoices();
       });
     });
+    const confirmBtn = document.getElementById('ticket-confirm-btn');
+    confirmBtn.disabled = selected.size < minKeep;
+    confirmBtn.style.opacity = selected.size < minKeep ? '0.45' : '1';
   }
   refreshTicketChoices();
 

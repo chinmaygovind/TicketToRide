@@ -68,8 +68,11 @@
     <!-- Start / Wait message -->
     <div class="lobby-actions">
       {% if player.is_host %}
-      <button id="start-btn" class="btn-start">Start Game</button>
-      <div class="start-hint">Minimum 2 players required.</div>
+      <div class="host-controls">
+        <button id="start-btn" class="btn-start">Start Game</button>
+        <button id="add-bot-btn" class="btn-add-bot">+ Add Bot</button>
+      </div>
+      <div class="start-hint">Minimum 2 players required. Bots play automatically.</div>
       {% else %}
       <div class="waiting-msg">
         <div class="spinner"></div>
@@ -123,6 +126,7 @@ function updatePlayerList(players) {
       <div class="player-dot" style="background:${COLOR_HEX[p.color] || '#888'};"></div>
       <span class="player-name">${escapeHtml(p.name)}</span>
       ${p.is_host ? '<span class="host-badge">HOST</span>' : ''}
+      ${p.is_bot ? '<span class="bot-badge">BOT</span>' : ''}
       ${p.id === PLAYER_ID ? '<span class="you-badge">YOU</span>' : ''}
     </div>
   `).join('');
@@ -148,6 +152,9 @@ document.getElementById('copy-btn').addEventListener('click', () => {
 if (IS_HOST) {
   document.getElementById('start-btn').addEventListener('click', () => {
     socket.emit('start_game', { code: GAME_CODE });
+  });
+  document.getElementById('add-bot-btn').addEventListener('click', () => {
+    socket.emit('add_bot', { code: GAME_CODE });
   });
 }
 </script>

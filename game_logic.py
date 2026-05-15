@@ -148,7 +148,7 @@ def _advance_initial_tickets(state: dict):
 
 def draw_face_up(state: dict, player_id: str, slot: int) -> dict:
     """Draw a specific face-up card (slot 0-4). Returns error dict on failure."""
-    if state["phase"] != "main":
+    if state["phase"] not in ("main", "final_round"):
         return {"ok": False, "error": "Not main game phase."}
     if state["current_player_id"] != player_id:
         return {"ok": False, "error": "Not your turn."}
@@ -189,7 +189,7 @@ def draw_face_up(state: dict, player_id: str, slot: int) -> dict:
 
 def draw_blind(state: dict, player_id: str) -> dict:
     """Draw blindly from the top of the deck."""
-    if state["phase"] != "main":
+    if state["phase"] not in ("main", "final_round"):
         return {"ok": False, "error": "Not main game phase."}
     if state["current_player_id"] != player_id:
         return {"ok": False, "error": "Not your turn."}
@@ -223,7 +223,7 @@ def claim_route(state: dict, player_id: str, route_id: int, cards_to_use: dict) 
     cards_to_use: {color: count} — the cards the player wants to spend.
     Locomotives are wildcards.
     """
-    if state["phase"] != "main":
+    if state["phase"] not in ("main", "final_round"):
         return {"ok": False, "error": "Not main game phase."}
     if state["current_player_id"] != player_id:
         return {"ok": False, "error": "Not your turn."}
