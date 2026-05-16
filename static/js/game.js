@@ -192,7 +192,31 @@ const PLAYER_HEX = {
 
 socket.on('connect', () => {
   socket.emit('register_session');
-  socket.emit('join_game_room', { code: GAME_CODE });
+  if (!IS_SPECTATOR) {
+    socket.emit('join_game_room', { code: GAME_CODE });
+  }
+});
+
+// ─── Spectator entry ──────────────────────────────────────────────────────────
+if (IS_SPECTATOR) {
+  document.body.classList.add('spectating');
+  const modal = document.getElementById('spectator-modal');
+  const input = document.getElementById('spectator-name-input');
+  const btn   = document.getElementById('spectator-watch-btn');
+
+  function joinAsSpectator() {
+    const name = input.value.trim() || 'Spectator';
+    modal.classList.add('hidden');
+    socket.emit('join_game_room', { code: GAME_CODE, spectator_name: name });
+  }
+
+  btn.addEventListener('click', joinAsSpectator);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') joinAsSpectator(); });
+  setTimeout(() => input.focus(), 100);
+}
+
+socket.on('spectator_joined', (data) => {
+  showToast(`👀 ${escHtml(data.name)} is spectating`, '#94a3b8', 3000);
 });
 
 socket.on('game_state', (state) => {
@@ -492,7 +516,7 @@ function renderBoard() {
         rect.setAttribute('stroke', 'rgba(255,255,255,0.3)');
         rect.setAttribute('stroke-width', '1');
         rect.classList.add('route-seg');
-        rect.addEventListener('click', () => onRouteClick(route.id));
+        if (!IS_SPECTATOR) rect.addEventListener('click', () => onRouteClick(route.id));
       }
 
       svg.appendChild(rect);
@@ -791,7 +815,7 @@ function renderStatusBar() {
 }
 
 function renderActionButtons() {
-  if (!gameState) return;
+  if (!gameState || IS_SPECTATOR) return;
   const isMyTurn = gameState.current_player_id === MY_PLAYER_ID;
   const drawingCards = gameState.draw_step > 0;
   const btn = document.getElementById('draw-tickets-btn');

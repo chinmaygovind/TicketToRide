@@ -1107,6 +1107,13 @@ html, body {
   border-color: #555;
 }
 
+/* ─── Spectator mode ─────────────────────────────────────────────────── */
+body.spectating #hand-section,
+body.spectating #tickets-section,
+body.spectating #actions-section { display: none; }
+
+body.spectating #draw-blind-btn { display: none; }
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -163,10 +163,12 @@ def lobby(code):
 def game_page(code):
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
-    if not player:
-        return redirect(url_for("index", join=code.upper()))
+    is_spectator = player is None
     if game.status == "waiting":
-        return redirect(url_for("lobby", code=code.upper()))
+        if player:
+            return redirect(url_for("lobby", code=code.upper()))
+        else:
+            return redirect(url_for("index", join=code.upper()))
 
     board_data = {
         "cities": {k: list(v) for k, v in CITIES.items()},
@@ -182,7 +184,8 @@ def game_page(code):
         f for f in os.listdir(music_dir) if f.lower().endswith(".mp3")
     ) if os.path.isdir(music_dir) else []
     return render_template("game.html", game=game, player=player,
-                           board_data=board_data, music_files=music_files)
+                           board_data=board_data, music_files=music_files,
+                           is_spectator=is_spectator)
 
 
 # ---------------------------------------------------------------------------
@@ -241,19 +244,25 @@ def on_start_game(data):
 @socketio.on("join_game_room")
 def on_join_game_room(data):
     code = data.get("code", "").upper()
+    spectator_name = data.get("spectator_name", "").strip()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
     if not game:
         return
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
-    if not player:
-        return
     join_room(code)
     state = game.state
-    pub = logic.get_public_state(state, str(player.id))
-    pub["my_player_id"] = str(player.id)
-    pub["my_color"] = player.color
-    emit("game_state", pub)
+    if player:
+        pub = logic.get_public_state(state, str(player.id))
+        pub["my_player_id"] = str(player.id)
+        pub["my_color"] = player.color
+        emit("game_state", pub)
+    else:
+        pub = logic.get_public_state(state, "")
+        pub["is_spectator"] = True
+        emit("game_state", pub)
+        if spectator_name:
+            socketio.emit("spectator_joined", {"name": spectator_name}, to=code)
 
 
 @socketio.on("add_bot")
