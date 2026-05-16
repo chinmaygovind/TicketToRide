@@ -1,0 +1,16 @@
+[Unit]
+Description=Ticket to Ride
+After=network.target
+
+[Service]
+User={{USER}}
+WorkingDirectory={{APP_DIR}}
+EnvironmentFile={{APP_DIR}}/.env
+ExecStart={{VENV}}/bin/gunicorn --worker-class eventlet -w 1 --bind 127.0.0.1:5001 app:app
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -11,7 +11,7 @@ class Game(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     code = db.Column(db.String(6), unique=True, nullable=False, index=True)
     status = db.Column(db.String(20), default="waiting")  # waiting | playing | ended
-    max_players = db.Column(db.Integer, default=5)
+    max_players = db.Column(db.Integer, default=6)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Full serialized game state as JSON text (avoids requiring JSONB dialect)

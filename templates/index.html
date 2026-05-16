@@ -24,7 +24,7 @@
           <input type="text" id="host-name" placeholder="Enter your name" maxlength="20" autocomplete="off"/>
           <label>Max Players</label>
           <div class="player-count-select">
-            {% for n in range(2, 6) %}
+            {% for n in range(2, 7) %}
             <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
             {% endfor %}
           </div>

@@ -6,19 +6,136 @@ const socket = io();
 let gameState = null;
 let pendingRouteId = null;
 
+// ─── Transition tracking ──────────────────────────────────────────────────────
+let prevCurrentPlayerId = null;
+let prevPhase = null;
+let lastKnownActionLogEntry = '';
+
+// ─── Sound system ─────────────────────────────────────────────────────────────
+let soundEnabled = true;
+let _gameOverSoundPlayed = false;
+
+// Map logical names → file paths
+const SOUND_FILES = {
+  your_turn:    '/static/sounds/your_turn.mp3',
+  draw_card:    '/static/sounds/take_card.mp3',
+  place_trains: '/static/sounds/place_train.mp3',
+  win:          '/static/sounds/win.mp3',
+  lose:         '/static/sounds/lose.mp3',
+};
+
+// Synth fallback (used for final_round fanfare which has no file)
+let _audioCtx = null;
+function _getAudioCtx() {
+  if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return _audioCtx;
+}
+function _synth(freq, dur, type = 'sine', vol = 0.2) {
+  try {
+    const ctx = _getAudioCtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, ctx.currentTime);
+    gain.gain.setValueAtTime(vol, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+    osc.start(); osc.stop(ctx.currentTime + dur);
+  } catch(e) {}
+}
+
+function playSound(name) {
+  if (!soundEnabled) return;
+  if (SOUND_FILES[name]) {
+    const a = new Audio(SOUND_FILES[name]);
+    a.play().catch(() => {});
+    return;
+  }
+  // Synth-only sounds
+  if (name === 'final_round') {
+    _synth(523, 0.18); setTimeout(() => _synth(659, 0.18), 200);
+    setTimeout(() => _synth(784, 0.18), 400); setTimeout(() => _synth(1047, 0.5), 600);
+  }
+}
+
+// ─── Music player ─────────────────────────────────────────────────────────────
+let musicEnabled = true;
+let _musicQueue = [];
+let _musicIdx = 0;
+const _musicAudio = new Audio();
+_musicAudio.volume = 0.35;
+
+function _initMusic() {
+  if (!window.MUSIC_FILES || !MUSIC_FILES.length) return;
+  // Shuffle
+  _musicQueue = [...MUSIC_FILES].sort(() => Math.random() - 0.5);
+  _musicIdx = 0;
+  _musicAudio.addEventListener('ended', () => {
+    _musicIdx = (_musicIdx + 1) % _musicQueue.length;
+    _loadAndPlayTrack();
+  });
+  _loadAndPlayTrack();
+}
+
+function _loadAndPlayTrack() {
+  if (!musicEnabled || !_musicQueue.length) return;
+  _musicAudio.src = `/static/music/${_musicQueue[_musicIdx]}`;
+  _musicAudio.play().catch(() => {}); // silently fails until user gesture
+}
+
+// Auto-start music on first user click (bypasses autoplay block)
+document.addEventListener('click', function _musicAutostart() {
+  if (musicEnabled && _musicAudio.paused && _musicQueue.length) {
+    _musicAudio.play().catch(() => {});
+  }
+}, { once: true });
+
+function toggleMusic() {
+  musicEnabled = !musicEnabled;
+  const btn = document.getElementById('music-toggle');
+  if (btn) btn.classList.toggle('audio-off', !musicEnabled);
+  if (musicEnabled) {
+    _loadAndPlayTrack();
+  } else {
+    _musicAudio.pause();
+  }
+}
+
+function toggleSound() {
+  soundEnabled = !soundEnabled;
+  const btn = document.getElementById('sound-toggle');
+  if (btn) btn.classList.toggle('audio-off', !soundEnabled);
+}
+
+// ─── Toast notifications ──────────────────────────────────────────────────────
+function showToast(msg, color = '#f59e0b', duration = 4000) {
+  const t = document.createElement('div');
+  t.className = 'game-toast';
+  t.style.borderColor = color;
+  t.style.color = color;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => t.classList.add('visible'));
+  setTimeout(() => {
+    t.classList.remove('visible');
+    setTimeout(() => t.remove(), 500);
+  }, duration);
+}
+
 // Card icon emoji map
 // Per-city label offsets [dx, dy] from city dot center.
 // Run scripts/label_debug.html to place labels, then paste the output here.
 const LABEL_OFFSETS = {
   "Vancouver": [-26, -25],
-  "Seattle": [49, -6],
+  "Seattle": [42, -22],
   "Portland": [35, 18],
   "San Francisco": [70, 6],
   "Los Angeles": [-44, 10],
   "Las Vegas": [0, 14],
   "Salt Lake City": [-62, -18],
   "Helena": [6, -53],
-  "Calgary": [-22, 18],
+  "Calgary": [-9, -24],
   "Winnipeg": [-50, -4],
   "Denver": [42, -20],
   "Omaha": [41, -2],
@@ -27,7 +144,7 @@ const LABEL_OFFSETS = {
   "Kansas City": [-52, -18],
   "Chicago": [27, 9],
   "Saint Louis": [44, 4],
-  "Oklahoma City": [-44, 20],
+  "Oklahoma City": [-51, -30],
   "Dallas": [-33, -10],
   "Houston": [-47, 0],
   "Little Rock": [53, 5],
@@ -35,7 +152,7 @@ const LABEL_OFFSETS = {
   "Nashville": [44, -8],
   "Atlanta": [34, -10],
   "Raleigh": [44, -2],
-  "Charleston": [14, 13],
+  "Charleston": [47, -4],
   "Miami": [0, 14],
   "Washington": [44, 5],
   "Pittsburgh": [-48, -3],
@@ -67,8 +184,8 @@ const CARD_BG = {
 
 // Player color hex map (should match server-side)
 const PLAYER_HEX = {
-  blue: '#3B82F6', red: '#EF4444', green: '#22C55E',
-  yellow: '#EAB308', black: '#6B7280',
+  red: '#EF4444', blue: '#3B82F6', green: '#22C55E',
+  yellow: '#EAB308', pink: '#EC4899', orange: '#F97316',
 };
 
 // ─── Socket setup ────────────────────────────────────────────────────────────
@@ -79,22 +196,38 @@ socket.on('connect', () => {
 });
 
 socket.on('game_state', (state) => {
+  // Detect your-turn transition before overwriting gameState
+  if (gameState &&
+      gameState.current_player_id !== MY_PLAYER_ID &&
+      state.current_player_id === MY_PLAYER_ID &&
+      (state.phase === 'main' || state.phase === 'final_round')) {
+    playSound('your_turn');
+    showToast('🎯 Your turn!', '#22c55e', 3000);
+  }
+  prevCurrentPlayerId = state.current_player_id;
+  prevPhase = state.phase;
+  lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
   gameState = state;
   renderAll();
 });
 
 socket.on('game_state_update', (state) => {
   if (!gameState) return;
-  gameState.claimed_routes    = state.claimed_routes;
-  gameState.face_up           = state.face_up;
-  gameState.deck_count        = state.deck_count;
-  gameState.dest_deck_count   = state.dest_deck_count;
-  gameState.action_log        = state.action_log;
-  gameState.phase             = state.phase;
-  gameState.current_player_id = state.current_player_id;
-  gameState.draw_step         = state.draw_step;
-  gameState.scores            = state.scores;
-  gameState.winner_id         = state.winner_id;
+  const oldCurrentPlayer = gameState.current_player_id;
+  const oldPhase = gameState.phase;
+
+  gameState.claimed_routes          = state.claimed_routes;
+  gameState.face_up                 = state.face_up;
+  gameState.deck_count              = state.deck_count;
+  gameState.dest_deck_count         = state.dest_deck_count;
+  gameState.action_log              = state.action_log;
+  gameState.phase                   = state.phase;
+  gameState.current_player_id       = state.current_player_id;
+  gameState.draw_step               = state.draw_step;
+  gameState.scores                  = state.scores;
+  gameState.winner_id               = state.winner_id;
+  gameState.final_round_players_left = state.final_round_players_left;
+  gameState.final_round_triggered_by = state.final_round_triggered_by;
   // Merge public-only per-player fields without touching hand/tickets
   for (const pid of Object.keys(state.players)) {
     if (gameState.players[pid]) {
@@ -104,12 +237,108 @@ socket.on('game_state_update', (state) => {
       gameState.players[pid].ticket_count = state.players[pid].ticket_count;
     }
   }
+
+  // Animate other players' draws from action log
+  animateFromActionLog(gameState.action_log);
+
+  // Detect transitions
+  const newCurrentPlayer = gameState.current_player_id;
+  const newPhase = gameState.phase;
+
+  if (newPhase === 'final_round' && oldPhase !== 'final_round') {
+    playSound('final_round');
+    const triggeredBy = gameState.final_round_triggered_by;
+    const triggerer = triggeredBy ? gameState.players[triggeredBy] : null;
+    const name = triggerer ? triggerer.name : 'Someone';
+    showToast(`⚠️ FINAL ROUND! ${name} has triggered the end. Everyone gets one last turn!`, '#f97316', 7000);
+  }
+
+  prevCurrentPlayerId = newCurrentPlayer;
+  prevPhase = newPhase;
+
   renderAll();
 });
 
 socket.on('error', (data) => {
   showStatus('❌ ' + data.message, '#ef4444');
 });
+
+// ─── Card animations ──────────────────────────────────────────────────────────
+
+function animateCardToElement(sourceEl, targetId, color) {
+  if (!sourceEl) return;
+  const sourceRect = sourceEl.getBoundingClientRect();
+  const targetEl = document.getElementById(targetId);
+  if (!targetEl) return;
+  const targetRect = targetEl.getBoundingClientRect();
+
+  const card = document.createElement('div');
+  card.style.cssText = `
+    position:fixed;left:${sourceRect.left}px;top:${sourceRect.top}px;
+    width:${Math.max(sourceRect.width,28)}px;height:${Math.max(sourceRect.height,18)}px;
+    background:${CARD_BG[color] || '#555'};border-radius:5px;
+    pointer-events:none;z-index:9999;opacity:0.92;
+    box-shadow:0 4px 14px rgba(0,0,0,0.55);
+    transition:left .42s cubic-bezier(.25,.46,.45,.94),top .42s cubic-bezier(.25,.46,.45,.94),
+               width .42s ease,height .42s ease,opacity .42s ease;`;
+  document.body.appendChild(card);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    card.style.left    = (targetRect.left + 6) + 'px';
+    card.style.top     = (targetRect.top  + 6) + 'px';
+    card.style.width   = '26px';
+    card.style.height  = '16px';
+    card.style.opacity = '0';
+  }));
+  setTimeout(() => card.remove(), 600);
+}
+
+function animateCardToPlayerRow(playerId, sourceId, color) {
+  const sourceEl = document.getElementById(sourceId);
+  const targetRow = document.querySelector(`.player-row[data-pid="${playerId}"]`);
+  if (!sourceEl || !targetRow) return;
+
+  const sourceRect = sourceEl.getBoundingClientRect();
+  const targetRect = targetRow.getBoundingClientRect();
+
+  const card = document.createElement('div');
+  card.style.cssText = `
+    position:fixed;left:${sourceRect.left + sourceRect.width/2}px;top:${sourceRect.top + sourceRect.height/2}px;
+    width:22px;height:14px;
+    background:${CARD_BG[color] || '#555'};border-radius:4px;
+    pointer-events:none;z-index:9999;opacity:0.85;
+    box-shadow:0 3px 10px rgba(0,0,0,0.5);
+    transition:left .38s cubic-bezier(.25,.46,.45,.94),top .38s cubic-bezier(.25,.46,.45,.94),opacity .38s ease;`;
+  document.body.appendChild(card);
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    card.style.left    = (targetRect.left + targetRect.width/2) + 'px';
+    card.style.top     = (targetRect.top  + targetRect.height/2) + 'px';
+    card.style.opacity = '0';
+  }));
+  setTimeout(() => {
+    card.remove();
+    // Flash the player row
+    targetRow.classList.add('card-received');
+    setTimeout(() => targetRow.classList.remove('card-received'), 500);
+  }, 420);
+}
+
+function animateFromActionLog(log) {
+  if (!log || log.length === 0 || !gameState) return;
+  const latest = log[log.length - 1];
+  if (latest === lastKnownActionLogEntry) return;
+  lastKnownActionLogEntry = latest;
+
+  for (const [pid, player] of Object.entries(gameState.players)) {
+    if (pid === MY_PLAYER_ID) continue;
+    const name = player.name;
+    if (latest.startsWith(name + ' drew face-up ')) {
+      const colorStr = latest.slice((name + ' drew face-up ').length).replace('.', '').trim();
+      animateCardToPlayerRow(pid, 'face-up-cards', colorStr);
+    } else if (latest.startsWith(name + ' drew a blind card')) {
+      animateCardToPlayerRow(pid, 'draw-blind-btn', 'locomotive');
+    }
+  }
+}
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
 
@@ -196,6 +425,7 @@ function renderBoard() {
   const cities = BOARD_DATA.cities;
   const routes = BOARD_DATA.routes;
   const claimed = gameState ? gameState.claimed_routes : {};
+  const numPlayers = gameState ? gameState.turn_order.length : 6;
 
   // Draw routes
   for (const route of routes) {
@@ -205,9 +435,8 @@ function renderBoard() {
 
     const segData = BOARD_DATA.route_segments && BOARD_DATA.route_segments[route.id];
     let segments;
-    
+
     if (segData && segData.length === route.length) {
-      // Use explicit segment data (in original 1024×683 board coords)
       const dx = c2[0] - c1[0], dy = c2[1] - c1[1];
       const dist = Math.sqrt(dx*dx + dy*dy);
       const segW = (dist / route.length) * 0.78;
@@ -216,10 +445,16 @@ function renderBoard() {
         return { x: bx - segW/2, y: by - segH/2, w: segW, h: segH, angle: segAngle, cx: bx, cy: by };
       });
     } else {
-      // Fallback: linear interpolation (board space, not screen space)
       segments = buildRouteSegments(c1, c2, route.length, route.side, route.color);
     }
     const claimedBy = claimed[String(route.id)];
+
+    // In 2-3 player games, if the partner route in a double is claimed, this one is closed
+    let isClosed = false;
+    if (!claimedBy && route.double_group && numPlayers <= 3) {
+      const partnerRoutes = routes.filter(r => r.double_group === route.double_group && r.id !== route.id);
+      isClosed = partnerRoutes.some(pr => claimed[String(pr.id)]);
+    }
 
     for (let i = 0; i < segments.length; i++) {
       const seg = segments[i];
@@ -243,6 +478,13 @@ function renderBoard() {
         rect.setAttribute('stroke-width', '1.5');
         rect.setAttribute('filter', 'url(#claimed-shadow)');
         rect.classList.add('route-seg', 'claimed');
+      } else if (isClosed) {
+        rect.setAttribute('fill', '#2a2522');
+        rect.setAttribute('fill-opacity', '0.7');
+        rect.setAttribute('stroke', 'rgba(255,0,0,0.25)');
+        rect.setAttribute('stroke-width', '1');
+        rect.classList.add('route-seg', 'closed');
+        // No click handler — closed
       } else {
         const routeColor = route.color === 'gray' ? '#9ca3af' : (BOARD_DATA.card_colors[route.color] || '#888');
         rect.setAttribute('fill', routeColor);
@@ -278,6 +520,7 @@ function renderBoard() {
     circle.setAttribute('stroke', '#c8a84b');
     circle.setAttribute('stroke-width', 1.5);
     circle.classList.add('city-circle');
+    circle.dataset.city = cityName;
     svg.appendChild(circle);
 
     const labelFontSize = 11;
@@ -365,7 +608,7 @@ function renderPlayersPanel() {
     if (!p) return '';
     const isActive = pid === gameState.current_player_id;
     const isMe = pid === MY_PLAYER_ID;
-    return `<div class="player-row ${isActive ? 'active-turn' : ''}">
+    return `<div class="player-row ${isActive ? 'active-turn' : ''}" data-pid="${pid}">
       <div class="player-color-dot" style="background:${PLAYER_HEX[p.color]};box-shadow:0 0 5px ${PLAYER_HEX[p.color]};"></div>
       <span class="player-row-name">${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}</span>
       <span class="player-row-score">${p.route_score}</span>
@@ -384,11 +627,18 @@ function renderFaceUpCards() {
     if (!color) return `<div class="train-card" style="background:#222;border-style:dashed;"></div>`;
     const label = color === 'locomotive' ? 'LOCO' : color.toUpperCase();
     return `<div class="train-card" style="background:${CARD_BG[color] || '#444'};"
-                 data-slot="${i}" onclick="onDrawFaceUp(${i})" title="${color}">
+                 data-slot="${i}" data-color="${color}" title="${color}">
               <span class="card-train-emoji">🚂</span>
               <div class="card-label">${label}</div>
             </div>`;
   }).join('');
+
+  area.querySelectorAll('.train-card[data-slot]').forEach(card => {
+    card.addEventListener('click', () => {
+      const slot = parseInt(card.dataset.slot);
+      onDrawFaceUp(slot, card);
+    });
+  });
 
   document.getElementById('deck-count').textContent = gameState.deck_count || 0;
 }
@@ -416,26 +666,66 @@ function renderHand() {
 
 // ─── Tickets ─────────────────────────────────────────────────────────────────
 
+function isTicketCompleted(ticket) {
+  if (!gameState || !ticket) return false;
+  const adj = {};
+  for (const [ridStr, pid] of Object.entries(gameState.claimed_routes)) {
+    if (pid !== MY_PLAYER_ID) continue;
+    const route = BOARD_DATA.routes.find(r => r.id === parseInt(ridStr));
+    if (!route) continue;
+    (adj[route.city1] = adj[route.city1] || []).push(route.city2);
+    (adj[route.city2] = adj[route.city2] || []).push(route.city1);
+  }
+  const visited = new Set();
+  const queue = [ticket.city1];
+  while (queue.length) {
+    const city = queue.shift();
+    if (city === ticket.city2) return true;
+    if (visited.has(city)) continue;
+    visited.add(city);
+    for (const next of (adj[city] || [])) {
+      if (!visited.has(next)) queue.push(next);
+    }
+  }
+  return false;
+}
+
+function highlightTicketCities(city1, city2, on) {
+  document.querySelectorAll('#board-svg .city-circle').forEach(c => {
+    if (c.dataset.city === city1 || c.dataset.city === city2) {
+      c.classList.toggle('city-highlight', on);
+    }
+  });
+}
+
 function renderTickets() {
   if (!gameState) return;
   const me = gameState.players[MY_PLAYER_ID];
   if (!me) return;
   const area = document.getElementById('tickets-panel');
-  const ticketsData = BOARD_DATA.tickets || [];
 
   if (!me.tickets || me.tickets.length === 0) {
     area.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No tickets yet.</div>';
     return;
   }
 
-  area.innerHTML = me.tickets.map(tid => {
+  area.innerHTML = '';
+  me.tickets.forEach(tid => {
     const t = getTicketById(tid);
-    if (!t) return '';
-    return `<div class="ticket-item">
-      <div class="ticket-cities">${escHtml(t.city1)} <span style="color:var(--text-muted);">→</span> ${escHtml(t.city2)}</div>
-      <div class="ticket-points">${t.points} pts</div>
-    </div>`;
-  }).join('');
+    if (!t) return;
+    const completed = isTicketCompleted(t);
+    const div = document.createElement('div');
+    div.className = 'ticket-item' + (completed ? ' completed' : '');
+    div.innerHTML = `
+      <div class="ticket-cities">
+        ${escHtml(t.city1)} <span style="color:var(--text-muted);">→</span> ${escHtml(t.city2)}
+        ${completed ? '<span class="ticket-check">✓</span>' : ''}
+      </div>
+      <div class="ticket-points">${t.points} pts</div>`;
+    div.addEventListener('mouseenter', () => highlightTicketCities(t.city1, t.city2, true));
+    div.addEventListener('mouseleave', () => highlightTicketCities(t.city1, t.city2, false));
+    area.appendChild(div);
+  });
 }
 
 // ─── Action log ──────────────────────────────────────────────────────────────
@@ -516,16 +806,22 @@ function renderActionButtons() {
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
 
-function onDrawFaceUp(slot) {
+function onDrawFaceUp(slot, sourceEl) {
   if (!gameState) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   if (gameState.phase !== 'main' && gameState.phase !== 'final_round') return;
+  const color = gameState.face_up[slot];
+  if (color && sourceEl) animateCardToElement(sourceEl, 'hand-cards', color);
+  playSound('draw_card');
   socket.emit('draw_face_up', { code: GAME_CODE, slot });
 }
 
 document.getElementById('draw-blind-btn').addEventListener('click', () => {
   if (!gameState) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
+  const btn = document.getElementById('draw-blind-btn');
+  animateCardToElement(btn, 'hand-cards', 'locomotive');
+  playSound('draw_card');
   socket.emit('draw_blind', { code: GAME_CODE });
 });
 
@@ -564,6 +860,16 @@ function onRouteClick(routeId) {
 
   const route = BOARD_DATA.routes.find(r => r.id === routeId);
   if (!route) return;
+
+  // Guard against closed double routes (2-3 player games)
+  if (route.double_group && gameState.turn_order.length <= 3) {
+    const partnerRoutes = BOARD_DATA.routes.filter(r => r.double_group === route.double_group && r.id !== route.id);
+    if (partnerRoutes.some(pr => gameState.claimed_routes[String(pr.id)])) {
+      showStatus('This route is closed in 2-3 player games.', '#ef4444');
+      return;
+    }
+  }
+
   pendingRouteId = routeId;
   openClaimModal(route);
 }
@@ -577,35 +883,37 @@ function openClaimModal(route) {
     Length: <strong>${route.length}</strong> &nbsp;|&nbsp;
     Color: <strong style="color:${route.color === 'gray' ? '#9ca3af' : BOARD_DATA.card_colors[route.color]}">${route.color.toUpperCase()}</strong>`;
 
-  // Build card selector
+  // Fixed grid of all 9 card types so layout never shifts
   const selector = document.getElementById('card-selector');
   const colorOrder = ['red','blue','green','yellow','orange','purple','black','white','locomotive'];
-  const available = colorOrder.filter(c => hand[c] > 0);
-
   selector.innerHTML = '';
   let selectedCombo = {};
 
   function refreshSelector() {
-    selector.innerHTML = '';
-    available.forEach(color => {
-      const chip = document.createElement('div');
-      chip.className = 'csel-chip' + (selectedCombo[color] ? ' selected' : '');
-      chip.style.background = CARD_BG[color];
-      chip.innerHTML = `
-        <span class="csel-chip-count">${selectedCombo[color] || 0} / ${hand[color]}</span>
-        <span class="csel-chip-name">${color.toUpperCase()}</span>`;
-      chip.addEventListener('click', () => {
-        // Increment selected count, cycling: 0→1→…→hand[color]→0
-        const cur = selectedCombo[color] || 0;
-        if (cur < hand[color]) {
-          selectedCombo[color] = cur + 1;
-        } else {
-          selectedCombo[color] = 0;
-        }
-        if (selectedCombo[color] === 0) delete selectedCombo[color];
-        refreshSelector();
-      });
-      selector.appendChild(chip);
+    // Update each chip in-place to avoid DOM reorder / layout shift
+    colorOrder.forEach(color => {
+      const inHand = hand[color] || 0;
+      const sel = selectedCombo[color] || 0;
+      let chip = selector.querySelector(`.csel-chip[data-color="${color}"]`);
+      if (!chip) {
+        chip = document.createElement('div');
+        chip.dataset.color = color;
+        chip.className = 'csel-chip';
+        chip.style.background = CARD_BG[color];
+        chip.innerHTML = `<span class="csel-chip-count"></span><span class="csel-chip-name">${color === 'locomotive' ? 'LOCO' : color.toUpperCase()}</span>`;
+        chip.addEventListener('click', () => {
+          if (inHand === 0) return;
+          const cur = selectedCombo[color] || 0;
+          selectedCombo[color] = cur < inHand ? cur + 1 : 0;
+          if (selectedCombo[color] === 0) delete selectedCombo[color];
+          refreshSelector();
+        });
+        selector.appendChild(chip);
+      }
+      chip.querySelector('.csel-chip-count').textContent = `${sel}/${inHand}`;
+      chip.classList.toggle('selected', sel > 0);
+      chip.classList.toggle('empty', inHand === 0);
+      chip.style.cursor = inHand > 0 ? 'pointer' : 'default';
     });
   }
   refreshSelector();
@@ -617,6 +925,7 @@ function openClaimModal(route) {
       route_id: pendingRouteId,
       cards: selectedCombo,
     });
+    playSound('place_trains');
     closeModal('claim-modal');
   };
 
@@ -697,6 +1006,10 @@ function openInitialTicketsModal() {
 
 function showGameOver() {
   if (!gameState || !gameState.scores) return;
+  if (!_gameOverSoundPlayed) {
+    _gameOverSoundPlayed = true;
+    playSound(gameState.winner_id === MY_PLAYER_ID ? 'win' : 'lose');
+  }
   const scores = gameState.scores;
   const winnerId = gameState.winner_id;
 
@@ -783,9 +1096,15 @@ socket.on('all_tickets', (tickets) => {
 
 // Handle ticket data from server (we'll populate it in the template too)
 (function preloadTickets() {
-  // Tickets embedded via the board data
   if (BOARD_DATA.tickets) {
     window._ticketCache = {};
     BOARD_DATA.tickets.forEach(t => { window._ticketCache[t.id] = t; });
   }
 })();
+
+// Wire audio toggle buttons
+document.getElementById('music-toggle').addEventListener('click', toggleMusic);
+document.getElementById('sound-toggle').addEventListener('click', toggleSound);
+
+// Kick off background music
+_initMusic();
