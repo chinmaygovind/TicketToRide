@@ -776,8 +776,8 @@ html, body {
 .ticket-choice {
   display: flex;
   align-items: center;
-  gap: 0.8rem;
-  padding: 0.7rem 1rem;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
   background: var(--bg-card);
   border: 1.5px solid var(--border);
   border-radius: 6px;
@@ -807,14 +807,15 @@ html, body {
   color: #000;
 }
 .ticket-choice-info { flex: 1; }
-.ticket-choice-route { font-size: 0.95rem; color: var(--text); }
+.ticket-choice-route { font-size: 0.78rem; color: var(--text); }
 .ticket-choice-route span { color: var(--text-muted); margin: 0 0.3rem; }
 .ticket-choice-pts {
   font-family: 'Cinzel', serif;
-  font-size: 1.1rem;
+  font-size: 0.85rem;
   color: var(--gold);
   font-weight: 700;
   margin-left: auto;
+  white-space: nowrap;
 }
 
 /* Card selector in claim modal */
@@ -983,8 +984,8 @@ html, body {
   background: rgba(0,0,0,0.25);
 }
 #ticket-modal .modal-box {
-  max-width: 340px;
-  width: 340px;
+  max-width: 240px;
+  width: 240px;
   max-height: 100vh;
   height: 100%;
   overflow-y: auto;
@@ -994,7 +995,26 @@ html, body {
   border-bottom: none;
   border-left: 1px solid var(--border);
   margin: 0;
-  padding: 1.5rem 1.2rem;
+  padding: 1rem 0.9rem;
+}
+#ticket-modal .modal-box h2 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+#ticket-modal .modal-desc {
+  font-size: 0.75rem;
+  margin-bottom: 0.6rem;
+}
+#ticket-modal .ticket-choices {
+  gap: 0.4rem;
+}
+#ticket-modal .ticket-choice-check {
+  width: 14px;
+  height: 14px;
+  font-size: 0.7rem;
+}
+#ticket-modal .modal-footer {
+  margin-top: 0.8rem;
 }
 
 /* ─── Audio control buttons (bottom-right) ───────────────────────────── */
