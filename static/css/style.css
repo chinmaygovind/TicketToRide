@@ -889,6 +889,150 @@ html, body {
   color: var(--gold-light);
 }
 
+/* ─── City highlight on ticket hover ────────────────────────────────── */
+.city-circle.city-highlight {
+  fill: #f59e0b !important;
+  stroke: #fde68a !important;
+  stroke-width: 3 !important;
+  filter: drop-shadow(0 0 7px #f59e0b) drop-shadow(0 0 14px rgba(245,158,11,0.5));
+  animation: city-pulse 0.8s ease-in-out infinite alternate;
+}
+@keyframes city-pulse {
+  from { filter: drop-shadow(0 0 5px #f59e0b); }
+  to   { filter: drop-shadow(0 0 12px #f59e0b) drop-shadow(0 0 20px rgba(245,158,11,0.6)); }
+}
+
+/* ─── Closed double-route (2-3 player games) ─────────────────────────── */
+.route-seg.closed {
+  cursor: not-allowed;
+  opacity: 0.3 !important;
+}
+.route-seg.closed:hover { filter: none !important; }
+
+/* ─── Ticket completion ──────────────────────────────────────────────── */
+.ticket-item.completed {
+  border-color: #22c55e;
+  box-shadow: 0 0 10px rgba(34,197,94,0.35), 0 0 3px rgba(34,197,94,0.2);
+  animation: ticket-glow 2s ease-in-out infinite alternate;
+}
+@keyframes ticket-glow {
+  from { box-shadow: 0 0 6px rgba(34,197,94,0.3); }
+  to   { box-shadow: 0 0 14px rgba(34,197,94,0.6), 0 0 4px rgba(34,197,94,0.3); }
+}
+.ticket-item.completed .ticket-points { color: #22c55e; }
+.ticket-check {
+  color: #22c55e;
+  font-weight: 700;
+  margin-left: 4px;
+  font-size: 0.85rem;
+}
+
+/* ─── Toast notifications ────────────────────────────────────────────── */
+.game-toast {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(-20px);
+  background: rgba(15,14,12,0.95);
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 0.75rem 1.4rem;
+  font-family: 'Cinzel', serif;
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  z-index: 5000;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease, transform 0.3s ease;
+  max-width: 480px;
+  text-align: center;
+  box-shadow: 0 6px 24px rgba(0,0,0,0.5);
+}
+.game-toast.visible {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ─── Card draw animation (player row flash) ─────────────────────────── */
+.player-row.card-received {
+  animation: card-recv 0.45s ease;
+}
+@keyframes card-recv {
+  0%   { background: rgba(200,168,75,0.12); }
+  40%  { background: rgba(200,168,75,0.45); }
+  100% { background: rgba(200,168,75,0.12); }
+}
+
+/* ─── Fixed card selector in claim modal ────────────────────────────── */
+.csel-chip.empty {
+  opacity: 0.3;
+  cursor: default !important;
+}
+.card-selector {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+
+/* ─── Ticket modal as side panel ─────────────────────────────────────── */
+#ticket-modal {
+  justify-content: flex-end;
+  align-items: stretch;
+}
+#ticket-modal .modal-backdrop {
+  background: rgba(0,0,0,0.25);
+}
+#ticket-modal .modal-box {
+  max-width: 340px;
+  width: 340px;
+  max-height: 100vh;
+  height: 100%;
+  overflow-y: auto;
+  border-radius: 0;
+  border-right: none;
+  border-top: none;
+  border-bottom: none;
+  border-left: 1px solid var(--border);
+  margin: 0;
+  padding: 1.5rem 1.2rem;
+}
+
+/* ─── Audio control buttons (bottom-right) ───────────────────────────── */
+.audio-controls {
+  position: fixed;
+  bottom: 46px; /* sit just above the status bar */
+  right: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  z-index: 600;
+}
+.audio-btn {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: rgba(26,24,20,0.92);
+  border: 1px solid var(--border);
+  color: var(--gold);
+  font-size: 1rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, opacity 0.15s, transform 0.1s;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+  padding: 0;
+  line-height: 1;
+}
+.audio-btn:hover {
+  border-color: var(--gold);
+  transform: scale(1.1);
+}
+.audio-btn.audio-off {
+  opacity: 0.35;
+  border-color: #555;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

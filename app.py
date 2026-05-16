@@ -177,8 +177,12 @@ def game_page(code):
         "board_h": BOARD_HEIGHT,
         "tickets": DESTINATION_TICKETS,
     }
+    music_dir = os.path.join(app.static_folder, "music")
+    music_files = sorted(
+        f for f in os.listdir(music_dir) if f.lower().endswith(".mp3")
+    ) if os.path.isdir(music_dir) else []
     return render_template("game.html", game=game, player=player,
-                           board_data=board_data)
+                           board_data=board_data, music_files=music_files)
 
 
 # ---------------------------------------------------------------------------

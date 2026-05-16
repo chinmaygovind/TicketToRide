@@ -78,6 +78,7 @@ def init_game_state(players: list[dict]) -> dict:
         "action_log": [],
         "winner_id": None,
         "scores": {},
+        "final_round_triggered_by": None,
     }
 
 
@@ -381,15 +382,15 @@ def _next_turn(state: dict):
 
 
 def _trigger_final_round(state: dict, triggering_player_id: str):
-    """Set up the final round — every player (including trigger) gets one last turn."""
+    """Set up the final round — every player gets one last turn, including the trigger player."""
     state["phase"] = "final_round"
+    state["final_round_triggered_by"] = triggering_player_id
     order = state["turn_order"]
     idx = order.index(triggering_player_id)
-    # Players after the triggering player still get one turn
-    remaining = [order[(idx + i + 1) % len(order)] for i in range(len(order) - 1)]
+    # All players get one last turn: next in order, then wrap back around to trigger player
+    remaining = [order[(idx + i + 1) % len(order)] for i in range(len(order))]
     state["final_round_players_left"] = remaining
 
-    cur = state["current_player_id"]
     state["current_player_id"] = order[(idx + 1) % len(order)]
     state["draw_step"] = 0
 
@@ -566,4 +567,5 @@ def get_public_state(state: dict, viewer_id: str) -> dict:
         "scores": state.get("scores", {}),
         "winner_id": state.get("winner_id"),
         "final_round_players_left": state.get("final_round_players_left", []),
+        "final_round_triggered_by": state.get("final_round_triggered_by"),
     }
