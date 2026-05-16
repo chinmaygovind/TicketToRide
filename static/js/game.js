@@ -175,7 +175,7 @@ function renderBoard() {
 
   const svg = document.getElementById('board-svg');
   svg.innerHTML = '';
-  
+
   // Set SVG viewBox and dimensions to match the board scaling
   svg.setAttribute('viewBox', '0 0 1024 683');
   svg.setAttribute('width', boardScale.imgW);
@@ -183,6 +183,15 @@ function renderBoard() {
   svg.style.position = 'absolute';
   svg.style.left = boardScale.imgX + 'px';
   svg.style.top = boardScale.imgY + 'px';
+
+  // Drop-shadow filter for claimed segments
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `
+    <filter id="claimed-shadow" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="rgba(0,0,0,0.7)"/>
+    </filter>
+  `;
+  svg.appendChild(defs);
 
   const cities = BOARD_DATA.cities;
   const routes = BOARD_DATA.routes;
@@ -230,8 +239,9 @@ function renderBoard() {
         const owner = gameState.players[claimedBy];
         const ownerColor = owner ? PLAYER_HEX[owner.color] : '#888';
         rect.setAttribute('fill', ownerColor);
-        rect.setAttribute('stroke', 'rgba(0,0,0,0.4)');
-        rect.setAttribute('stroke-width', '1');
+        rect.setAttribute('stroke', 'rgba(255,255,255,0.75)');
+        rect.setAttribute('stroke-width', '1.5');
+        rect.setAttribute('filter', 'url(#claimed-shadow)');
         rect.classList.add('route-seg', 'claimed');
       } else {
         const routeColor = route.color === 'gray' ? '#9ca3af' : (BOARD_DATA.card_colors[route.color] || '#888');
@@ -244,6 +254,17 @@ function renderBoard() {
       }
 
       svg.appendChild(rect);
+
+      if (claimedBy) {
+        // Small center pip to distinguish claimed segments
+        const pip = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+        pip.setAttribute('cx', seg.cx);
+        pip.setAttribute('cy', seg.cy);
+        pip.setAttribute('r', '2');
+        pip.setAttribute('fill', 'rgba(255,255,255,0.85)');
+        pip.setAttribute('pointer-events', 'none');
+        svg.appendChild(pip);
+      }
     }
   }
 

@@ -317,7 +317,7 @@ def _expand_cards(cards: dict) -> list:
 # ---------------------------------------------------------------------------
 
 def draw_destination_tickets(state: dict, player_id: str) -> dict:
-    if state["phase"] != "main":
+    if state["phase"] not in ("main", "final_round"):
         return {"ok": False, "error": "Not main game phase."}
     if state["current_player_id"] != player_id:
         return {"ok": False, "error": "Not your turn."}
@@ -381,15 +381,15 @@ def _next_turn(state: dict):
 
 
 def _trigger_final_round(state: dict, triggering_player_id: str):
-    """Set up the final round — every player (including trigger) gets one last turn."""
+    """Set up the final round: all other players get one last turn, then the triggering player gets one final turn."""
     state["phase"] = "final_round"
     order = state["turn_order"]
     idx = order.index(triggering_player_id)
-    # Players after the triggering player still get one turn
+    # Players after the trigger go first, then the triggering player gets the very last turn
     remaining = [order[(idx + i + 1) % len(order)] for i in range(len(order) - 1)]
+    remaining.append(triggering_player_id)
     state["final_round_players_left"] = remaining
 
-    cur = state["current_player_id"]
     state["current_player_id"] = order[(idx + 1) % len(order)]
     state["draw_step"] = 0
 
