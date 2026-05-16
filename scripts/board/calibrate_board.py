@@ -12,10 +12,13 @@ from PIL import Image, ImageTk
 import numpy as np
 import cv2, json, math, os
 
-IMG_PATH     = "static/images/board.png"
-SAVE_FILE    = "calibration_progress.json"
-CITIES_OUT   = "city_coords.py"
-SEGMENTS_OUT = "route_segments.py"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_ROOT = os.path.dirname(os.path.dirname(_HERE))  # project root
+
+IMG_PATH     = os.path.join(_ROOT, "static", "images", "board.png")
+SAVE_FILE    = os.path.join(_HERE, "calibration_progress.json")
+CITIES_OUT   = os.path.join(_HERE, "city_coords.py")
+SEGMENTS_OUT = os.path.join(_ROOT, "route_segments.py")
 
 CITIES = [
     "Vancouver","Seattle","Portland","San Francisco","Los Angeles",
@@ -122,6 +125,10 @@ ROUTES = [
     {"id": 93,"city1":"Toronto",       "city2":"Sault St. Marie","length":2,"color":"gray",  "side":0},
     {"id": 94,"city1":"Toronto",       "city2":"Chicago",        "length":4,"color":"white", "side":0},
     {"id": 95,"city1":"Duluth",        "city2":"Omaha",          "length":2,"color":"gray",  "side":1},
+    {"id": 96,"city1":"Seattle",       "city2":"Calgary",        "length":4,"color":"gray",  "side":0},
+    {"id": 97,"city1":"Phoenix",       "city2":"Santa Fe",       "length":3,"color":"gray",  "side":0},
+    {"id": 98,"city1":"El Paso",       "city2":"Oklahoma City",  "length":5,"color":"yellow","side":0},
+    {"id": 99,"city1":"Charleston",    "city2":"Miami",          "length":4,"color":"purple","side":0},
 ]
 
 COLOR_HEX = {

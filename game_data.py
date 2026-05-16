@@ -5,14 +5,15 @@
 BOARD_WIDTH = 1024
 BOARD_HEIGHT = 683
 
-PLAYER_COLORS = ["blue", "red", "green", "yellow", "black"]
+PLAYER_COLORS = ["red", "blue", "green", "yellow", "pink", "orange"]
 
 PLAYER_COLOR_HEX = {
-    "blue":   "#3B82F6",
     "red":    "#EF4444",
+    "blue":   "#3B82F6",
     "green":  "#22C55E",
     "yellow": "#EAB308",
-    "black":  "#1F2937",
+    "pink":   "#EC4899",
+    "orange": "#F97316",
 }
 
 # Train card colors (8 types + locomotive wild)
@@ -184,6 +185,10 @@ ROUTES = [
     {"id": 93, "city1": "Toronto",        "city2": "Sault St. Marie","length": 2, "color": "gray",   "double_group": None,       "side": 0},
     {"id": 94, "city1": "Toronto",        "city2": "Chicago",        "length": 4, "color": "white",  "double_group": None,       "side": 0},
     {"id": 95, "city1": "Duluth",         "city2": "Omaha",          "length": 2, "color": "gray",   "double_group": "DUL-OMA", "side": 1},
+    {"id": 96, "city1": "Seattle",        "city2": "Calgary",        "length": 4, "color": "gray",   "double_group": None,       "side": 0},
+    {"id": 97, "city1": "Phoenix",        "city2": "Santa Fe",       "length": 3, "color": "gray",   "double_group": None,       "side": 0},
+    {"id": 98, "city1": "El Paso",        "city2": "Oklahoma City",  "length": 5, "color": "yellow", "double_group": None,       "side": 0},
+    {"id": 99, "city1": "Charleston",     "city2": "Miami",          "length": 4, "color": "purple", "double_group": None,       "side": 0},
 ]
 
 # 30 Destination Tickets

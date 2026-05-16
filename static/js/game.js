@@ -23,7 +23,6 @@ const SOUND_FILES = {
   win:          '/static/sounds/win.mp3',
   lose:         '/static/sounds/lose.mp3',
 };
-const _soundCache = {};
 
 // Synth fallback (used for final_round fanfare which has no file)
 let _audioCtx = null;
@@ -49,11 +48,7 @@ function _synth(freq, dur, type = 'sine', vol = 0.2) {
 function playSound(name) {
   if (!soundEnabled) return;
   if (SOUND_FILES[name]) {
-    if (!_soundCache[name]) {
-      _soundCache[name] = new Audio(SOUND_FILES[name]);
-    }
-    const a = _soundCache[name];
-    a.currentTime = 0;
+    const a = new Audio(SOUND_FILES[name]);
     a.play().catch(() => {});
     return;
   }
@@ -133,14 +128,14 @@ function showToast(msg, color = '#f59e0b', duration = 4000) {
 // Run scripts/label_debug.html to place labels, then paste the output here.
 const LABEL_OFFSETS = {
   "Vancouver": [-26, -25],
-  "Seattle": [49, -6],
+  "Seattle": [42, -22],
   "Portland": [35, 18],
   "San Francisco": [70, 6],
   "Los Angeles": [-44, 10],
   "Las Vegas": [0, 14],
   "Salt Lake City": [-62, -18],
   "Helena": [6, -53],
-  "Calgary": [-22, 18],
+  "Calgary": [-9, -24],
   "Winnipeg": [-50, -4],
   "Denver": [42, -20],
   "Omaha": [41, -2],
@@ -149,7 +144,7 @@ const LABEL_OFFSETS = {
   "Kansas City": [-52, -18],
   "Chicago": [27, 9],
   "Saint Louis": [44, 4],
-  "Oklahoma City": [-44, 20],
+  "Oklahoma City": [-51, -30],
   "Dallas": [-33, -10],
   "Houston": [-47, 0],
   "Little Rock": [53, 5],
@@ -157,7 +152,7 @@ const LABEL_OFFSETS = {
   "Nashville": [44, -8],
   "Atlanta": [34, -10],
   "Raleigh": [44, -2],
-  "Charleston": [14, 13],
+  "Charleston": [47, -4],
   "Miami": [0, 14],
   "Washington": [44, 5],
   "Pittsburgh": [-48, -3],
@@ -189,8 +184,8 @@ const CARD_BG = {
 
 // Player color hex map (should match server-side)
 const PLAYER_HEX = {
-  blue: '#3B82F6', red: '#EF4444', green: '#22C55E',
-  yellow: '#EAB308', black: '#6B7280',
+  red: '#EF4444', blue: '#3B82F6', green: '#22C55E',
+  yellow: '#EAB308', pink: '#EC4899', orange: '#F97316',
 };
 
 // ─── Socket setup ────────────────────────────────────────────────────────────
@@ -201,7 +196,14 @@ socket.on('connect', () => {
 });
 
 socket.on('game_state', (state) => {
-  // On full personal state, seed transition trackers so we don't fire on first load
+  // Detect your-turn transition before overwriting gameState
+  if (gameState &&
+      gameState.current_player_id !== MY_PLAYER_ID &&
+      state.current_player_id === MY_PLAYER_ID &&
+      (state.phase === 'main' || state.phase === 'final_round')) {
+    playSound('your_turn');
+    showToast('🎯 Your turn!', '#22c55e', 3000);
+  }
   prevCurrentPlayerId = state.current_player_id;
   prevPhase = state.phase;
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
@@ -249,12 +251,6 @@ socket.on('game_state_update', (state) => {
     const triggerer = triggeredBy ? gameState.players[triggeredBy] : null;
     const name = triggerer ? triggerer.name : 'Someone';
     showToast(`⚠️ FINAL ROUND! ${name} has triggered the end. Everyone gets one last turn!`, '#f97316', 7000);
-  }
-
-  if (oldCurrentPlayer !== newCurrentPlayer && newCurrentPlayer === MY_PLAYER_ID &&
-      (newPhase === 'main' || newPhase === 'final_round')) {
-    playSound('your_turn');
-    showToast('🎯 Your turn!', '#22c55e', 3000);
   }
 
   prevCurrentPlayerId = newCurrentPlayer;
@@ -420,7 +416,7 @@ function renderBoard() {
   const cities = BOARD_DATA.cities;
   const routes = BOARD_DATA.routes;
   const claimed = gameState ? gameState.claimed_routes : {};
-  const numPlayers = gameState ? gameState.turn_order.length : 5;
+  const numPlayers = gameState ? gameState.turn_order.length : 6;
 
   // Draw routes
   for (const route of routes) {

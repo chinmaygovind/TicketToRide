@@ -79,14 +79,14 @@ def index():
 @app.route("/create", methods=["POST"])
 def create_game():
     name = request.json.get("name", "").strip()
-    max_players = int(request.json.get("max_players", 5))
+    max_players = int(request.json.get("max_players", 6))
     if not name:
         return jsonify({"ok": False, "error": "Name required."}), 400
 
     sk = get_session_key()
     code = _make_game_code()
 
-    game = Game(code=code, max_players=max(2, min(5, max_players)))
+    game = Game(code=code, max_players=max(2, min(6, max_players)))
     db.session.add(game)
     db.session.flush()
 

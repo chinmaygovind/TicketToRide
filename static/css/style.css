@@ -459,7 +459,11 @@ html, body {
   gap: 0;
   flex-shrink: 0;
 }
-.right-sidebar { border-right: none; border-left: 1px solid var(--border); }
+.right-sidebar {
+  border-right: none;
+  border-left: 1px solid var(--border);
+  overflow-y: hidden; /* let children handle their own scroll */
+}
 
 .sidebar-section {
   padding: 0.9rem;
@@ -713,13 +717,20 @@ html, body {
 .ticket-item.failed { border-color: #ef4444; }
 .ticket-item.failed .ticket-points { color: #ef4444; text-decoration: line-through; }
 
-/* Action log */
+/* Action log — section grows, log scrolls inside it */
+.action-log-section {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
 .action-log {
   font-size: 0.78rem;
   color: var(--text-muted);
   line-height: 1.6;
-  max-height: 180px;
+  flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 .action-log p { margin-bottom: 0.2rem; }
 .action-log p:last-child { color: var(--text); }
@@ -1017,15 +1028,58 @@ html, body {
   margin-top: 0.8rem;
 }
 
-/* ─── Audio control buttons (bottom-right) ───────────────────────────── */
-.audio-controls {
-  position: fixed;
-  bottom: 46px; /* sit just above the status bar */
-  right: 10px;
+/* ─── Scoring reference section (inside right sidebar) ──────────────── */
+.scoring-section {
+  margin-top: auto; /* push scoring + audio to the very bottom */
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+}
+.scoring-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 12px;
+  margin-bottom: 8px;
+}
+.scoring-grid-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 3px 0;
+  font-size: 0.7rem;
+  color: #a09078;
+  gap: 6px;
+}
+.sc-label { flex: 1; }
+.sc-pts {
+  color: #e0d0a8;
+  font-weight: 600;
+  white-space: nowrap;
+  font-size: 0.72rem;
+}
+.sc-pos { color: #86efac; }
+.sc-neg { color: #fca5a5; }
+.scoring-bonuses {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  z-index: 600;
+  gap: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+}
+.scoring-bonus-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.7rem;
+  color: #a09078;
+}
+
+/* ─── Audio controls — inline in sidebar ────────────────────────────── */
+.audio-controls {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  justify-content: center;
+  padding: 4px 0 2px;
 }
 .audio-btn {
   width: 34px;
