@@ -211,6 +211,10 @@ const ROUTES = [
   {id:93,city1:"Toronto",city2:"Sault St. Marie",length:2,color:"gray",side:0},
   {id:94,city1:"Toronto",city2:"Chicago",length:4,color:"white",side:0},
   {id:95,city1:"Duluth",city2:"Omaha",length:2,color:"gray",side:1},
+  {id:96,city1:"Seattle",city2:"Calgary",length:4,color:"gray",side:0},
+  {id:97,city1:"Phoenix",city2:"Santa Fe",length:3,color:"gray",side:0},
+  {id:98,city1:"El Paso",city2:"Oklahoma City",length:5,color:"yellow",side:0},
+  {id:99,city1:"Charleston",city2:"Miami",length:4,color:"purple",side:0},
 ];
 
 // ── Route segment centers (from route_segments.py) ───────────────────────────
@@ -292,6 +296,10 @@ const ROUTE_SEGMENTS = {
   93:[[774,160,11.3],[736,155,14.9]],
   94:[[797,190,-37.2],[766,207,-9.5],[732,221,-36.5],[706,246,-47.6]],
   95:[[574,245,-68.8],[561,280,-66]],
+  96:[[137,159,-1.7],[174,158,-10.6],[207,142,-33.7],[230,114,-67.2]],
+  97:[[300,504,-25],[333,490,-22.8],[366,476,-22.5]],
+  98:[[413,544,-16.9],[446,531,-26.6],[477,513,-34.2],[506,490,-47.4],[530,463,-55.3]],
+  99:[[895,465,-90],[898,501,86.3],[906,537,73.3],[921,570,63.4]],
 };
 
 // ── Card color hex map ────────────────────────────────────────────────────────
@@ -306,8 +314,24 @@ const DEFAULT = [0, 14];
 const FONT_SIZE = 11;
 const NS = 'http://www.w3.org/2000/svg';
 
+// Current label offsets from game.js — edit here after each save
+const SAVED_OFFSETS = {
+  "Vancouver": [-26, -25], "Seattle": [49, -6],   "Portland": [35, 18],
+  "San Francisco": [70, 6], "Los Angeles": [-44, 10], "Las Vegas": [0, 14],
+  "Salt Lake City": [-62, -18], "Helena": [6, -53], "Calgary": [-22, 18],
+  "Winnipeg": [-50, -4],  "Denver": [42, -20],    "Omaha": [41, -2],
+  "Duluth": [-36, -17],   "Sault St. Marie": [-24, -43], "Kansas City": [-52, -18],
+  "Chicago": [27, 9],     "Saint Louis": [44, 4],  "Oklahoma City": [-44, 20],
+  "Dallas": [-33, -10],   "Houston": [-47, 0],     "Little Rock": [53, 5],
+  "New Orleans": [4, 10], "Nashville": [44, -8],   "Atlanta": [34, -10],
+  "Raleigh": [44, -2],    "Charleston": [14, 13],  "Miami": [0, 14],
+  "Washington": [44, 5],  "Pittsburgh": [-48, -3], "New York": [45, 2],
+  "Boston": [26, 3],      "Montreal": [42, -17],   "Toronto": [33, -17],
+  "Santa Fe": [-44, -4],  "Phoenix": [0, 14],      "El Paso": [-13, 16],
+};
+
 const offsets = {};
-Object.keys(CITIES).forEach(n => { offsets[n] = [...DEFAULT]; });
+Object.keys(CITIES).forEach(n => { offsets[n] = SAVED_OFFSETS[n] ? [...SAVED_OFFSETS[n]] : [...DEFAULT]; });
 
 let dragging = null;
 let activeCity = null;

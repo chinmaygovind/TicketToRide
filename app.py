@@ -79,14 +79,14 @@ def index():
 @app.route("/create", methods=["POST"])
 def create_game():
     name = request.json.get("name", "").strip()
-    max_players = int(request.json.get("max_players", 5))
+    max_players = int(request.json.get("max_players", 6))
     if not name:
         return jsonify({"ok": False, "error": "Name required."}), 400
 
     sk = get_session_key()
     code = _make_game_code()
 
-    game = Game(code=code, max_players=max(2, min(5, max_players)))
+    game = Game(code=code, max_players=max(2, min(6, max_players)))
     db.session.add(game)
     db.session.flush()
 
@@ -177,8 +177,12 @@ def game_page(code):
         "board_h": BOARD_HEIGHT,
         "tickets": DESTINATION_TICKETS,
     }
+    music_dir = os.path.join(app.static_folder, "music")
+    music_files = sorted(
+        f for f in os.listdir(music_dir) if f.lower().endswith(".mp3")
+    ) if os.path.isdir(music_dir) else []
     return render_template("game.html", game=game, player=player,
-                           board_data=board_data)
+                           board_data=board_data, music_files=music_files)
 
 
 # ---------------------------------------------------------------------------

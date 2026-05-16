@@ -1,162 +1,117 @@
-# Ticket to Ride — Agent Handoff
+# Ticket to Ride — Handoff Doc
 
 ## What This Is
-A full multiplayer online Ticket to Ride (North America) web app.
-- Flask + Flask-SocketIO (`async_mode="threading"`) backend
-- SQLAlchemy with SQLite (default) or PostgreSQL (`DATABASE_URL` env var)
-- Vanilla JS + SVG overlay on `static/images/board.png` (1024×683px)
-- Session-key based player identity; game state stored as JSON in DB
-- Run with `python app.py` → http://localhost:5001
+Full multiplayer online Ticket to Ride (North America).
 
-## Current Bugs (What Needs Fixing)
+- **Backend:** Flask + Flask-SocketIO (`async_mode="eventlet"`), SQLAlchemy
+- **DB:** SQLite (default, `instance/tickettoride.db`) or PostgreSQL via `DATABASE_URL`
+- **Frontend:** Vanilla JS + custom SVG board overlay (`static/images/board.svg`) — fully hand-traced, NOT a raster image
+- **Identity:** Flask session cookie → `session_key` → `Player` row in DB
+- **Run locally:** `python app.py` → http://localhost:5001
+- **Python:** 3.14, Windows 11 dev machine
 
-### Bug 1: Route segments on SVG don't align with the printed board
-The city coordinates in `game_data.py` `CITIES` dict are wrong/estimated.
-The SVG rendering in `static/js/game.js` interpolates route segments between
-city coordinates — so wrong cities = wrong routes.
+## Branches
+| Branch | Purpose |
+|--------|---------|
+| `main` | Development — uses `async_mode="threading"`, no gunicorn |
+| `aws-deploy` | Production on EC2 — eventlet + gunicorn + nginx, SQLite |
+| `render-deploy` | Render.com config — eventlet + gunicorn + PostgreSQL |
 
-**Fix in progress:** A full board calibration pipeline was built. The user has
-already clicked all 36 city dots and all ~280 train car slots (one click per slot,
-per color). The detection script needs to be completed and its output wired in.
+**Deployed at:** http://52.54.184.133 (EC2 t2.micro, Ubuntu 22.04, us-east-1)
 
-### Bug 2: Drawing cards doesn't show them in your hand; tickets don't appear
-Root cause: `socket.on('game_state_update', ...)` in `static/js/game.js` line 56
-overwrites `gameState.players` with generic state that has empty `hand` and
-`tickets` for all players (since `get_public_state(state, "")` omits private data).
+On the EC2 instance:
+```bash
+sudo systemctl restart tickettoride   # restart app
+sudo journalctl -u tickettoride -f    # live logs
+# to update: cd ~/TicketToRide && git pull && sudo systemctl restart tickettoride
+```
 
-**Fix:** In the `game_state_update` handler, do NOT overwrite `gameState.players`.
-Only update shared fields: `claimed_routes`, `face_up`, `deck_count`,
-`dest_deck_count`, `action_log`, `phase`, `current_player_id`, `draw_step`,
-`scores`, `winner_id`. Per-player public info (trains, route_score) can be
-merged per-player without touching hand/tickets.
+## Key Files
+```
+app.py                    — Flask routes + all SocketIO event handlers + _run_bots
+game_logic.py             — Full rules engine: draw, claim, tickets, scoring, BFS for longest path
+game_data.py              — CITIES (36, pixel coords), ROUTES (95), DESTINATION_TICKETS (30)
+models.py                 — Game + Player SQLAlchemy models; game state stored as JSON text column
+route_segments.py         — Explicit per-route segment centers: {route_id: [[cx, cy, angle], ...]}
+static/js/game.js         — All client-side: SVG rendering, socket handlers, modals, UI
+static/css/style.css      — Dark antique theme (Cinzel font, gold accents)
+static/images/board.svg   — Hand-traced SVG map (ocean, US landmass, Great Lakes)
+templates/game.html       — Injects BOARD_DATA, GAME_CODE, MY_PLAYER_ID, MY_COLOR as JS globals
+templates/lobby.html      — Pre-game lobby (share code, player list, Add Bot button)
+templates/index.html      — Home (create / join)
+scripts/label_debug.html  — Standalone drag tool for placing city label offsets (open in browser, no server)
+deploy/setup.sh           — One-shot EC2 bootstrap (run from repo root on Ubuntu 22.04)
+deploy/nginx.conf         — nginx reverse proxy config with WebSocket upgrade headers
+deploy/tickettoride.service — systemd unit file
+```
 
-```js
-// game_state_update handler — CORRECT version:
-socket.on('game_state_update', (state) => {
-  if (!gameState) return;
-  gameState.claimed_routes   = state.claimed_routes;
-  gameState.face_up          = state.face_up;
-  gameState.deck_count       = state.deck_count;
-  gameState.dest_deck_count  = state.dest_deck_count;
-  gameState.action_log       = state.action_log;
-  gameState.phase            = state.phase;
-  gameState.current_player_id = state.current_player_id;
-  gameState.draw_step        = state.draw_step;
-  gameState.scores           = state.scores;
-  gameState.winner_id        = state.winner_id;
-  // Merge public-only player fields (trains, score) without touching hand/tickets
-  for (const pid of Object.keys(state.players)) {
-    if (gameState.players[pid]) {
-      gameState.players[pid].trains      = state.players[pid].trains;
-      gameState.players[pid].route_score = state.players[pid].route_score;
-      gameState.players[pid].card_count  = state.players[pid].card_count;
-      gameState.players[pid].ticket_count = state.players[pid].ticket_count;
+## Architecture Notes
+
+### Game State
+All game state lives in `Game.state_json` (a JSON text column). `game_logic.py` mutates the state dict in place, then `app.py` saves it back. State is a single dict:
+```python
+{
+  "deck": [...],
+  "face_up": [...],           # 5 face-up cards (None = empty slot)
+  "dest_deck": [...],
+  "claimed_routes": {},       # {route_id_str: player_id_str}
+  "player_states": {
+    "player_id": {
+      "hand": {"red": 2, ...},
+      "tickets": [1, 4, ...], # kept destination ticket IDs
+      "pending_tickets": [],  # drawn but not yet kept
+      "trains": 45,
+      "route_score": 0,
     }
-  }
-  renderAll();
-});
+  },
+  "current_player_id": "...",
+  "phase": "initial_tickets | main | final_round | ended",
+  "draw_step": 0,             # 0 = no draw yet, 1 = drew first card
+  "action_log": [...],
+}
 ```
 
-## Board Calibration Pipeline (In Progress)
+### Socket Events
+`_broadcast_state(game, code)` sends two events after every action:
+1. `game_state` → personal room (player's session_key) — includes hand, pending_tickets
+2. `game_state_update` → game code room — public data only (claimed_routes, face_up, etc.)
 
-The user clicked every city dot and every train car slot on the board image.
-The data is stored and partially processed. The goal is to produce:
-- `city_coords.py` — `CITIES = { "Vancouver": (x, y), ... }` for all 36 cities
-- `route_segments.py` — `ROUTE_SEGMENTS = { route_id: [(cx, cy, angle), ...] }`
+The client merges `game_state_update` carefully to avoid clobbering private hand/ticket data.
 
-### Files involved
-| File | Purpose | Status |
-|------|---------|--------|
-| `pick_colors.py` | Tkinter tool — user clicks every car slot per color + all city dots | Done, run by user |
-| `color_points.json` | Output of pick_colors.py — raw click coords per color | EXISTS, ready |
-| `detect_board.py` | OpenCV script — finds precise bounding rects from clicks | Partially working |
-| `templates.json` | Bounding box samples (from earlier draw_templates.py) | EXISTS |
-| `color_samples.json` | Single-pixel HSV samples per color (from earlier pick_colors.py version) | EXISTS |
-| `city_coords.py` | Target output — city pixel positions | NOT YET CORRECT |
-| `route_segments.py` | Target output — per-route segment centers + angles | NOT YET CORRECT |
+### Bot Players
+Bots are `Player` rows with `session_key` starting with `"bot_"`. After every game action, `_run_bots(game, code)` iterates until the current player is human:
+- `initial_tickets` phase: auto-keeps all pending tickets
+- `main/final_round`: draws 2 blind cards
 
-### Click data counts in color_points.json
-```
-gray:   93 clicks  (80 gray slots across ~30 gray routes)
-yellow: 27 clicks  (22 yellow slots)
-blue:   27 clicks
-red:    27 clicks
-green:  22 clicks  (21 green slots)
-orange: 27 clicks
-white:  27 clicks
-pink:   27 clicks  (routes called "purple" in code = pink visually)
-black:  27 clicks
-city:   36 clicks  (all 36 city dots, unordered)
-```
+Host adds bots via "Add Bot" button in the lobby. Bots show a purple BOT badge.
 
-### detect_board.py current state
-- **City matching**: Works — uses raw click positions + Hungarian algorithm against
-  `APPROX_CITIES` (approximate positions from game_data.py, Winnipeg corrected to x≈467).
-  Produces all 36 cities correctly.
-- **Car slot detection**: Uses `find_rect()` per click — samples HSV at click pixel,
-  creates local color mask, finds connected component, returns `minAreaRect`.
-  Currently produces ~91 gray, 27 each for most colors, 22 green rects.
-- **Route assignment**: Groups car rects by proximity to city-city lines (PERP_BAND=26px).
-  **Currently has 68 route warnings** — many routes get wrong number of segments.
-  Root cause: APPROX_CITIES positions used for route band math are too far off from
-  actual city positions. The city_pos from Hungarian matching IS correct, but the
-  route assignment code runs AFTER and uses city_pos correctly — so the issue is
-  likely the PERP_BAND being too narrow/wide, or clicks being on neighboring route lines.
+### Board SVG Overlay
+`game.js` renders a `<svg id="board-svg">` on top of `<img id="board-img">`. ViewBox is `0 0 1024 683`. Route segments use explicit `(cx, cy, angle)` data from `route_segments.py` (passed as `BOARD_DATA.route_segments`). Fallback: linear interpolation between city coords.
 
-### What needs to happen next in detect_board.py
-1. Run the script and look at the debug image `static/images/board_detected.png`
-   to visually diagnose route assignment failures.
-2. The main issues are likely:
-   a. PERP_BAND too tight — some car slots (especially diagonal routes) fall outside 26px
-   b. Gray routes — many gray route bands overlap each other, causing cross-assignment
-   c. A few car slot clicks may have been on the wrong color band
-3. Suggested fixes:
-   - Widen PERP_BAND to 35px
-   - For gray routes specifically, use city_pos (from detection) not APPROX_CITIES
-     to define bands (the code already does this — make sure city_pos is populated first)
-   - After assignment, if a route has more segments than expected, keep only the
-     `route.length` closest to the midpoints (discard outliers)
-   - If a route has 0 segments, fall back to linear interpolation between the two cities
+City label offsets are in `const LABEL_OFFSETS` at the top of `game.js` — all 36 cities manually placed using `scripts/label_debug.html`.
 
-### After calibration is done
-Once `city_coords.py` and `route_segments.py` are correct:
-1. Update `game_data.py` `CITIES` dict from `city_coords.py`
-2. Change the JS rendering in `static/js/game.js` `buildRouteSegments()` to use
-   explicit segment positions from `ROUTE_SEGMENTS` (passed via `BOARD_DATA`) instead
-   of interpolating between city positions
-3. `BOARD_DATA` is injected in `templates/game.html` from `app.py`'s `game_page()` view
-4. Also pass `route_segments` in `board_data` dict in `app.py`
+## What Was Recently Fixed / Added
+- **Double-submit ticket bug:** `renderAll` now closes the ticket modal if pending_tickets clears while modal is open (race between `game_state_update` and `game_state`)
+- **Ticket modal:** defaults to all unchecked; confirm button disabled until ≥2 selected (initial) or ≥1 (mid-game draw); free deselection allowed
+- **Train card visuals:** 🚂 emoji on face-up cards; locomotive is rainbow gradient (`LOCO` label); hand cards are a single column
+- **Route hover:** mouseenter/mouseleave on any segment highlights all segments in that route (brightness + glow)
+- **Bot players:** full lobby UI + backend auto-play
+- **game_logic.py:** `draw_blind`, `draw_face_up`, `claim_route` now all allow `final_round` phase (were incorrectly rejecting it)
 
-## Key File Map
-```
-app.py                  — Flask routes + SocketIO events
-game_data.py            — CITIES, ROUTES, DESTINATION_TICKETS, scoring constants
-game_logic.py           — Full rules engine (draw, claim, tickets, scoring, BFS/DFS)
-models.py               — Game + Player DB models (state as JSON text column)
-static/js/game.js       — Board SVG rendering, socket handlers, UI
-static/css/style.css    — Dark antique theme
-templates/game.html     — Injects BOARD_DATA, GAME_CODE, MY_PLAYER_ID, MY_COLOR
-templates/lobby.html    — Pre-game lobby
-templates/index.html    — Home page (create/join)
-static/images/board.png — 1024x683 board image
-```
+## Feature Requests (Not Yet Built)
+These came up during playtesting — implement in a new chat:
 
-## Todos (Priority Order)
-1. **Fix `game_state_update` JS bug** (Bug 2 above) — simple edit to `game.js` lines 45-60
-2. **Fix detect_board.py** — widen PERP_BAND, check debug image, get route warnings to 0
-3. **Wire calibration output into game** — update CITIES in game_data.py, update JS rendering
-   to use ROUTE_SEGMENTS for precise segment positions instead of interpolation
+1. **Route completion indicator** — when you successfully claim a route, flash the segments or show a toast/banner (e.g. "+7 pts!" overlay on the board near the route)
 
-## How the SVG Rendering Works (for context)
-`buildRouteSegments(p1, p2, length, side, color)` in game.js takes two city screen
-positions, interpolates `length` segment centers along the line, applies a
-perpendicular offset of ±4px for double routes (side=0 or 1), and draws rotated
-rectangles. Once `route_segments.py` exists, replace this with a lookup:
-each segment already has `(cx, cy, angle)` in original board pixel coords, which
-get transformed to screen coords via `boardPx(cx, cy)`.
+2. **Ticket hover → highlight cities** — when hovering a ticket card in "YOUR TICKETS" panel, highlight the two endpoint city dots on the board (pulse or glow)
 
-## Environment
-- Python 3.14, Windows 11
-- pip packages: Flask, Flask-SocketIO, Flask-SQLAlchemy, python-dotenv, opencv-python, scipy, Pillow
-- Run: `python app.py` (port 5001)
-- `.env` has DATABASE_URL=sqlite:///tickettoride.db, SECRET_KEY, PORT=5001
+3. **Card draw animation** — when a face-up card is clicked or blind draw happens, animate the card flying into the current player's hand area (or off-screen to another player's side if it's not your turn and you're watching)
+
+4. **Your turn sound notification** — play a sound when it becomes your turn. User will provide the sound file. Hook: in `renderStatusBar()` or `renderAll()`, detect transition from `current_player_id !== MY_PLAYER_ID` → `=== MY_PLAYER_ID` and play the sound. Need to store previous `current_player_id` to detect the transition.
+
+## Known Issues / Things to Watch
+- **SQLite on EC2:** data lives on the instance disk. If the instance is stopped/terminated, game data is lost. Fine for now.
+- **Single gunicorn worker (`-w 1`):** required because socket rooms live in-process memory. Do not increase workers without adding a message queue (Redis + `socketio = SocketIO(app, message_queue=...)`).
+- **Eventlet deprecation warning:** harmless, eventlet still works with Flask-SocketIO 5.x.
+- **Free tier EC2 (t2.micro):** 1GB RAM. Has been fine in testing. Watch memory if you add more features.
+- **No HTTPS:** the EC2 deployment is plain HTTP. Fine for playing with friends on a known IP, but browsers will warn about "not secure" on some features. Add a domain + Let's Encrypt (certbot) to fix.
