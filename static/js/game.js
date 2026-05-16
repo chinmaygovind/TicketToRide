@@ -712,7 +712,7 @@ function showGameOver() {
           <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${PLAYER_HEX[s.color]};margin-right:6px;"></span>
           ${escHtml(s.name)}
         </div>
-        <div class="score-row-detail">Routes: ${s.route_score} | Longest path: ${s.longest_path}${longestBonus}</div>
+        <div class="score-row-detail">Routes: ${s.route_score} | Longest path: ${s.longest_path}${longestBonus} | Destinations: ${s.tickets && s.tickets.length ? (s.tickets.reduce((sum, t) => sum + t.delta, 0) >= 0 ? '+' : '') + s.tickets.reduce((sum, t) => sum + t.delta, 0) : 0}</div>
         <div class="score-row-detail">${formatTickets(s.tickets)}</div>
       </div>
       <div class="score-row-total">${s.total}</div>
