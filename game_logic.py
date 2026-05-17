@@ -79,6 +79,7 @@ def init_game_state(players: list[dict]) -> dict:
         "winner_id": None,
         "scores": {},
         "final_round_triggered_by": None,
+        "turns_taken": 0,
     }
 
 
@@ -368,6 +369,7 @@ def _next_turn(state: dict):
     cur = state["current_player_id"]
     idx = order.index(cur)
     nxt = order[(idx + 1) % len(order)]
+    state["turns_taken"] = state.get("turns_taken", 0) + 1
 
     if state["phase"] == "final_round":
         remaining = state["final_round_players_left"]
@@ -569,4 +571,5 @@ def get_public_state(state: dict, viewer_id: str) -> dict:
         "winner_id": state.get("winner_id"),
         "final_round_players_left": state.get("final_round_players_left", []),
         "final_round_triggered_by": state.get("final_round_triggered_by"),
+        "round_number": state.get("turns_taken", 0) // max(len(state["turn_order"]), 1) + 1,
     }

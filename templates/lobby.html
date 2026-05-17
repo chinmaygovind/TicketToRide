@@ -6,22 +6,37 @@
   <div class="lobby-container">
 
     <div class="lobby-header">
+      <a href="/lobbies" class="lobby-back-link">← Back to Lobbies</a>
       <h1 class="lobby-title">TICKET TO RIDE</h1>
-      <div class="lobby-subtitle">Game Lobby</div>
+      <div class="lobby-subtitle">
+        Game Lobby
+        {% if game.is_private %}
+        <span class="lobby-privacy-badge badge-private-pill">🔒 PRIVATE</span>
+        {% else %}
+        <span class="lobby-privacy-badge badge-public-pill">🌐 PUBLIC</span>
+        {% endif %}
+      </div>
     </div>
 
-    <!-- Share Code -->
+    <!-- Game Code / Invite -->
     <div class="code-box">
-      <div class="code-label">SHARE THIS CODE WITH FRIENDS</div>
+      <div class="code-label">
+        {% if game.is_private %}SHARE THESE WITH FRIENDS TO INVITE THEM{% else %}SHARE THIS CODE TO INVITE FRIENDS{% endif %}
+      </div>
       <div class="code-display" id="game-code">{{ game.code }}</div>
-      <button class="copy-btn" id="copy-btn" title="Copy link">
+      {% if game.is_private and game.passcode %}
+      <div class="passcode-display">
+        Passcode: <span class="passcode-value">{{ game.passcode }}</span>
+      </div>
+      {% endif %}
+      <button class="copy-btn" id="copy-btn" title="Copy invite link">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
           <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
         </svg>
         Copy Link
       </button>
-      <div id="copy-feedback" class="copy-feedback hidden">Link copied!</div>
+      <div id="copy-feedback" class="copy-feedback hidden">Copied!</div>
     </div>
 
     <!-- Players List -->
@@ -30,9 +45,10 @@
       <div id="player-list" class="player-list">
         {% for p in game.players %}
         <div class="player-entry" data-id="{{ p.id }}">
-          <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280'}[p.color] }};"></div>
+          <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280','pink':'#EC4899','orange':'#F97316'}[p.color] }};"></div>
           <span class="player-name">{{ p.name }}</span>
           {% if p.is_host %}<span class="host-badge">HOST</span>{% endif %}
+          {% if p.session_key.startswith('bot_') %}<span class="bot-badge">BOT</span>{% endif %}
           {% if p.id == player.id %}<span class="you-badge">YOU</span>{% endif %}
         </div>
         {% endfor %}
@@ -52,7 +68,7 @@
       </ul>
     </div>
 
-    <!-- Route scoring reminder -->
+    <!-- Route Scoring -->
     <div class="scoring-table">
       <div class="section-title">ROUTE SCORING</div>
       <div class="score-chips">
@@ -65,7 +81,7 @@
       </div>
     </div>
 
-    <!-- Start / Wait message -->
+    <!-- Actions -->
     <div class="lobby-actions">
       {% if player.is_host %}
       <div class="host-controls">
@@ -93,7 +109,7 @@ const PLAYER_ID = {{ player.id }};
 
 const COLOR_HEX = {
   blue: '#3B82F6', red: '#EF4444', green: '#22C55E',
-  yellow: '#EAB308', black: '#6B7280'
+  yellow: '#EAB308', black: '#6B7280', pink: '#EC4899', orange: '#F97316'
 };
 
 const socket = io();
@@ -123,14 +139,29 @@ function updatePlayerList(players) {
   document.getElementById('player-count').textContent = players.length;
   list.innerHTML = players.map(p => `
     <div class="player-entry">
-      <div class="player-dot" style="background:${COLOR_HEX[p.color] || '#888'};"></div>
+      <div class="player-dot" style="background:${COLOR_HEX[p.color] || '#888'};box-shadow:0 0 6px ${COLOR_HEX[p.color] || '#888'};"></div>
       <span class="player-name">${escapeHtml(p.name)}</span>
       ${p.is_host ? '<span class="host-badge">HOST</span>' : ''}
       ${p.is_bot ? '<span class="bot-badge">BOT</span>' : ''}
       ${p.id === PLAYER_ID ? '<span class="you-badge">YOU</span>' : ''}
+      ${IS_HOST && p.id !== PLAYER_ID ? `<button class="kick-btn" data-pid="${p.id}" title="Kick player">✕</button>` : ''}
     </div>
   `).join('');
+
+  if (IS_HOST) {
+    list.querySelectorAll('.kick-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        socket.emit('kick_player', { code: GAME_CODE, player_id: parseInt(btn.dataset.pid) });
+      });
+    });
+  }
 }
+
+socket.on('player_kicked', (data) => {
+  if (data.player_id === PLAYER_ID) {
+    window.location.href = '/lobbies';
+  }
+});
 
 function escapeHtml(text) {
   const div = document.createElement('div');
@@ -138,7 +169,6 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Copy link
 document.getElementById('copy-btn').addEventListener('click', () => {
   const url = window.location.origin + '/lobby/' + GAME_CODE;
   navigator.clipboard.writeText(url).then(() => {
@@ -148,7 +178,6 @@ document.getElementById('copy-btn').addEventListener('click', () => {
   });
 });
 
-// Start game (host only)
 if (IS_HOST) {
   document.getElementById('start-btn').addEventListener('click', () => {
     socket.emit('start_game', { code: GAME_CODE });

@@ -4,6 +4,8 @@
 
 const socket = io();
 let gameState = null;
+let amHost = false;
+let botPlayerIds = [];
 let pendingRouteId = null;
 
 // ─── Transition tracking ──────────────────────────────────────────────────────
@@ -11,11 +13,14 @@ let prevCurrentPlayerId = null;
 let prevPhase = null;
 let lastKnownActionLogEntry = '';
 
-// ─── Sound system ─────────────────────────────────────────────────────────────
+// ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
 let soundEnabled = true;
 let _gameOverSoundPlayed = false;
 
-// Map logical names → file paths
+let _audioCtx = null;
+const _soundBuffers = {};   // pre-loaded decoded buffers
+let _audioUnlocked = false;
+
 const SOUND_FILES = {
   your_turn:    '/static/sounds/your_turn.mp3',
   draw_card:    '/static/sounds/take_card.mp3',
@@ -24,12 +29,28 @@ const SOUND_FILES = {
   lose:         '/static/sounds/lose.mp3',
 };
 
-// Synth fallback (used for final_round fanfare which has no file)
-let _audioCtx = null;
 function _getAudioCtx() {
   if (!_audioCtx) _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
   return _audioCtx;
 }
+
+// Called once on first user gesture — resumes context and pre-loads all buffers
+async function _unlockAudio() {
+  if (_audioUnlocked) return;
+  _audioUnlocked = true;
+  try {
+    const ctx = _getAudioCtx();
+    if (ctx.state === 'suspended') await ctx.resume();
+    for (const [name, url] of Object.entries(SOUND_FILES)) {
+      try {
+        const res = await fetch(url);
+        const raw = await res.arrayBuffer();
+        _soundBuffers[name] = await ctx.decodeAudioData(raw);
+      } catch(e) {}
+    }
+  } catch(e) {}
+}
+
 function _synth(freq, dur, type = 'sine', vol = 0.2) {
   try {
     const ctx = _getAudioCtx();
@@ -47,12 +68,17 @@ function _synth(freq, dur, type = 'sine', vol = 0.2) {
 
 function playSound(name) {
   if (!soundEnabled) return;
-  if (SOUND_FILES[name]) {
-    const a = new Audio(SOUND_FILES[name]);
-    a.play().catch(() => {});
+  if (_soundBuffers[name]) {
+    try {
+      const ctx = _getAudioCtx();
+      const src = ctx.createBufferSource();
+      src.buffer = _soundBuffers[name];
+      src.connect(ctx.destination);
+      src.start();
+    } catch(e) {}
     return;
   }
-  // Synth-only sounds
+  // Synth-only sounds (no file)
   if (name === 'final_round') {
     _synth(523, 0.18); setTimeout(() => _synth(659, 0.18), 200);
     setTimeout(() => _synth(784, 0.18), 400); setTimeout(() => _synth(1047, 0.5), 600);
@@ -68,7 +94,6 @@ _musicAudio.volume = 0.35;
 
 function _initMusic() {
   if (!window.MUSIC_FILES || !MUSIC_FILES.length) return;
-  // Shuffle
   _musicQueue = [...MUSIC_FILES].sort(() => Math.random() - 0.5);
   _musicIdx = 0;
   _musicAudio.addEventListener('ended', () => {
@@ -81,13 +106,14 @@ function _initMusic() {
 function _loadAndPlayTrack() {
   if (!musicEnabled || !_musicQueue.length) return;
   _musicAudio.src = `/static/music/${_musicQueue[_musicIdx]}`;
-  _musicAudio.play().catch(() => {}); // silently fails until user gesture
+  _musicAudio.play().catch(() => {});
 }
 
-// Auto-start music on first user click (bypasses autoplay block)
-document.addEventListener('click', function _musicAutostart() {
-  if (musicEnabled && _musicAudio.paused && _musicQueue.length) {
-    _musicAudio.play().catch(() => {});
+// Single first-click handler: unlock AudioContext + start music
+document.addEventListener('click', function _firstGestureHandler() {
+  _unlockAudio();
+  if (musicEnabled && _musicQueue.length && _musicAudio.paused) {
+    _loadAndPlayTrack();
   }
 }, { once: true });
 
@@ -201,22 +227,42 @@ socket.on('connect', () => {
 if (IS_SPECTATOR) {
   document.body.classList.add('spectating');
   const modal = document.getElementById('spectator-modal');
-  const input = document.getElementById('spectator-name-input');
-  const btn   = document.getElementById('spectator-watch-btn');
 
-  function joinAsSpectator() {
-    const name = input.value.trim() || 'Spectator';
-    modal.classList.add('hidden');
-    socket.emit('join_game_room', { code: GAME_CODE, spectator_name: name });
+  if (SPECTATOR_NAME) {
+    // Logged-in user — skip modal, join immediately with their username
+    if (modal) modal.classList.add('hidden');
+    socket.emit('join_game_room', { code: GAME_CODE, spectator_name: SPECTATOR_NAME });
+  } else {
+    const input = document.getElementById('spectator-name-input');
+    const btn   = document.getElementById('spectator-watch-btn');
+
+    function joinAsSpectator() {
+      const name = input.value.trim() || 'Spectator';
+      modal.classList.add('hidden');
+      socket.emit('join_game_room', { code: GAME_CODE, spectator_name: name });
+    }
+
+    btn.addEventListener('click', joinAsSpectator);
+    input.addEventListener('keydown', e => { if (e.key === 'Enter') joinAsSpectator(); });
+    setTimeout(() => input.focus(), 100);
   }
-
-  btn.addEventListener('click', joinAsSpectator);
-  input.addEventListener('keydown', e => { if (e.key === 'Enter') joinAsSpectator(); });
-  setTimeout(() => input.focus(), 100);
 }
 
 socket.on('spectator_joined', (data) => {
   showToast(`👀 ${escHtml(data.name)} is spectating`, '#94a3b8', 3000);
+});
+
+socket.on('player_kicked', (data) => {
+  if (String(data.player_id) === String(MY_PLAYER_ID)) {
+    window.location.href = '/lobbies';
+  }
+});
+
+// Kick button delegation (players panel re-renders so use delegation)
+document.getElementById('players-panel').addEventListener('click', e => {
+  const btn = e.target.closest('.kick-btn');
+  if (!btn) return;
+  socket.emit('kick_player', { code: GAME_CODE, player_id: parseInt(btn.dataset.pid) });
 });
 
 socket.on('game_state', (state) => {
@@ -232,6 +278,8 @@ socket.on('game_state', (state) => {
   prevPhase = state.phase;
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
   gameState = state;
+  if (state.is_host !== undefined) amHost = state.is_host;
+  if (state.bot_player_ids) botPlayerIds = state.bot_player_ids;
   renderAll();
 });
 
@@ -392,11 +440,32 @@ function renderAll() {
 let svgInitialized = false;
 let boardScale = { x: 1, y: 1, imgX: 0, imgY: 0, imgW: 1024, imgH: 683 };
 
+const MOBILE_BOARD_BASE = 900;  // board width in px at zoom level 1 on mobile
+let mobileZoom = 1.0;
+
 function recalcBoardScale() {
   const img = document.getElementById('board-img');
   const container = document.getElementById('board-container');
   if (!img.naturalWidth) return;
 
+  if (window.innerWidth <= 768) {
+    // Mobile: fixed-width scrollable board; JS sets img size explicitly
+    const boardW = Math.round(MOBILE_BOARD_BASE * mobileZoom);
+    const boardH = Math.round(boardW * (img.naturalHeight / img.naturalWidth));
+    img.style.width  = boardW + 'px';
+    img.style.height = boardH + 'px';
+    boardScale = {
+      x: boardW / img.naturalWidth,
+      y: boardH / img.naturalHeight,
+      imgX: 0, imgY: 0,
+      imgW: boardW, imgH: boardH,
+    };
+    return;
+  }
+
+  // Desktop: fit-contain within container
+  img.style.width  = '';
+  img.style.height = '';
   const containerW = container.clientWidth;
   const containerH = container.clientHeight;
   const naturalW = img.naturalWidth;
@@ -616,11 +685,6 @@ function buildRouteSegments(p1, p2, length, side, color) {
   return segments;
 }
 
-window.addEventListener('resize', () => {
-  recalcBoardScale();
-  renderBoard();
-});
-
 // ─── Players panel ───────────────────────────────────────────────────────────
 
 function renderPlayersPanel() {
@@ -632,11 +696,15 @@ function renderPlayersPanel() {
     if (!p) return '';
     const isActive = pid === gameState.current_player_id;
     const isMe = pid === MY_PLAYER_ID;
+    const isBot = botPlayerIds.includes(pid);
+    const canKick = amHost && !isMe && !IS_SPECTATOR;
     return `<div class="player-row ${isActive ? 'active-turn' : ''}" data-pid="${pid}">
       <div class="player-color-dot" style="background:${PLAYER_HEX[p.color]};box-shadow:0 0 5px ${PLAYER_HEX[p.color]};"></div>
-      <span class="player-row-name">${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}</span>
+      <span class="player-row-name">${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}${isBot ? ' <span style="color:var(--text-muted);font-size:0.65rem;">(bot)</span>' : ''}</span>
       <span class="player-row-score">${p.route_score}</span>
       <span class="player-row-trains">🚂${p.trains}</span>
+      <span class="player-row-tickets">🎫${p.ticket_count ?? 0}</span>
+      ${canKick ? `<button class="kick-btn" data-pid="${pid}" title="Kick player">✕</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -683,7 +751,7 @@ function renderHand() {
            data-color="${c}">
         <span class="chip-icon">🚂</span>
         <span class="chip-count">${hand[c]}</span>
-        <span class="chip-name">${c === 'locomotive' ? 'LOCO' : c.toUpperCase()}</span>
+        <span class="chip-name">${c === 'locomotive' ? 'LOCOMOTIVE' : c.toUpperCase()}</span>
       </div>`)
     .join('');
 }
@@ -760,6 +828,10 @@ function renderActionLog() {
   const log = gameState.action_log || [];
   el.innerHTML = log.map(l => `<p>${escHtml(l)}</p>`).join('');
   el.scrollTop = el.scrollHeight;
+  const label = document.getElementById('action-log-label');
+  if (label && gameState.round_number) {
+    label.textContent = `ACTION LOG — Round ${gameState.round_number}`;
+  }
 }
 
 // ─── Status bar ──────────────────────────────────────────────────────────────
@@ -1132,3 +1204,55 @@ document.getElementById('sound-toggle').addEventListener('click', toggleSound);
 
 // Kick off background music
 _initMusic();
+
+// ─── Mobile: tab bar & board zoom ────────────────────────────────────────────
+
+(function initMobile() {
+  function isMobile() { return window.innerWidth <= 768; }
+
+  // Tab bar — show left or right sidebar as a slide-up panel
+  const tabs = document.querySelectorAll('.mobile-tab');
+  const leftSidebar  = document.querySelector('.left-sidebar');
+  const rightSidebar = document.querySelector('.right-sidebar');
+
+  function setMobileTab(panelName) {
+    tabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelName));
+    leftSidebar.classList.remove('mobile-open');
+    rightSidebar.classList.remove('mobile-open');
+    if (panelName === 'left')  leftSidebar.classList.add('mobile-open');
+    if (panelName === 'right') rightSidebar.classList.add('mobile-open');
+  }
+
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => setMobileTab(tab.dataset.panel));
+  });
+
+  // Close mobile panel when tapping the board (outside the panel)
+  document.getElementById('board-container').addEventListener('click', () => {
+    if (isMobile()) setMobileTab('board');
+  }, true);
+
+  // Zoom buttons
+  const zoomIn  = document.getElementById('zoom-in-btn');
+  const zoomOut = document.getElementById('zoom-out-btn');
+  if (zoomIn) {
+    zoomIn.addEventListener('click', () => {
+      mobileZoom = Math.min(mobileZoom + 0.25, 3.0);
+      recalcBoardScale();
+      renderBoard();
+    });
+  }
+  if (zoomOut) {
+    zoomOut.addEventListener('click', () => {
+      mobileZoom = Math.max(mobileZoom - 0.25, 0.5);
+      recalcBoardScale();
+      renderBoard();
+    });
+  }
+
+  // Re-run board scale recalc on resize (handles rotation, window resize)
+  window.addEventListener('resize', () => {
+    recalcBoardScale();
+    renderBoard();
+  });
+})();

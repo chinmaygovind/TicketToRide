@@ -2,9 +2,15 @@ import eventlet
 eventlet.monkey_patch()
 
 import os
+import re
 import random
 import string
 import uuid
+import secrets
+import json as json_mod
+import urllib.request as urlreq
+import urllib.parse as urlparse
+from functools import wraps
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -13,7 +19,7 @@ from flask import (Flask, render_template, request, jsonify,
                    redirect, url_for, session)
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
-from models import db, Game, Player
+from models import db, Game, Player, User
 from game_data import ROUTES, CITIES, DESTINATION_TICKETS, TICKET_BY_ID, PLAYER_COLORS, CARD_COLOR_HEX, BOARD_WIDTH, BOARD_HEIGHT
 from route_segments import ROUTE_SEGMENTS
 import game_logic as logic
@@ -29,27 +35,67 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 if not DATABASE_URL:
-    # Fallback to SQLite for development without a PostgreSQL instance
     DATABASE_URL = "sqlite:///tickettoride.db"
 
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+
+# Google OAuth (optional — requires GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET env vars)
+GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = os.environ.get("GOOGLE_REDIRECT_URI")  # set explicitly for production
+GOOGLE_ENABLED = bool(GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET)
 
 db.init_app(app)
 socketio = SocketIO(app, cors_allowed_origins="*", async_mode="eventlet")
 
 with app.app_context():
     db.create_all()
+    # Add new columns to existing databases without dropping data
+    _migration_stmts = [
+        "ALTER TABLE games ADD COLUMN is_private BOOLEAN DEFAULT 0",
+        "ALTER TABLE games ADD COLUMN passcode VARCHAR(20)",
+    ]
+    with db.engine.connect() as _conn:
+        for _stmt in _migration_stmts:
+            try:
+                _conn.execute(db.text(_stmt))
+                _conn.commit()
+            except Exception:
+                _conn.rollback()
 
 
 # ---------------------------------------------------------------------------
-# Session helpers
+# Auth helpers
 # ---------------------------------------------------------------------------
 
 def get_session_key() -> str:
     if "session_key" not in session:
         session["session_key"] = str(uuid.uuid4())
     return session["session_key"]
+
+
+def get_current_user():
+    user_id = session.get("user_id")
+    if not user_id:
+        return None
+    return User.query.get(user_id)
+
+
+def get_effective_name() -> str:
+    user = get_current_user()
+    if user:
+        return user.username
+    return session.get("guest_name", "Guest")
+
+
+def require_login(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not get_current_user() and not session.get("guest_name"):
+            return redirect(url_for("login_page"))
+        return f(*args, **kwargs)
+    return decorated
 
 
 def _make_game_code() -> str:
@@ -67,26 +113,253 @@ def get_player_for_game(game_code: str) -> Player | None:
     return Player.query.filter_by(game_id=game.id, session_key=sk).first()
 
 
+def _valid_username(u: str) -> bool:
+    return bool(re.match(r'^[A-Za-z][A-Za-z0-9_\-]{1,29}$', u))
+
+
 # ---------------------------------------------------------------------------
-# HTTP Routes
+# Google OAuth helpers
+# ---------------------------------------------------------------------------
+
+def _google_post(url: str, data: dict) -> dict:
+    encoded = urlparse.urlencode(data).encode()
+    req = urlreq.Request(url, data=encoded, method="POST")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    with urlreq.urlopen(req, timeout=10) as resp:
+        return json_mod.loads(resp.read())
+
+
+def _google_get(url: str, token: str) -> dict:
+    req = urlreq.Request(url)
+    req.add_header("Authorization", f"Bearer {token}")
+    with urlreq.urlopen(req, timeout=10) as resp:
+        return json_mod.loads(resp.read())
+
+
+# ---------------------------------------------------------------------------
+# HTTP Routes — Auth
 # ---------------------------------------------------------------------------
 
 @app.route("/")
 def index():
-    return render_template("index.html")
+    if get_current_user() or session.get("guest_name"):
+        return redirect(url_for("lobbies"))
+    return redirect(url_for("login_page"))
+
+
+@app.route("/login", methods=["GET"])
+def login_page():
+    if get_current_user() or session.get("guest_name"):
+        return redirect(url_for("lobbies"))
+    google_setup = bool(request.args.get("google_setup"))
+    return render_template("login.html", google_enabled=GOOGLE_ENABLED,
+                           google_setup=google_setup)
+
+
+@app.route("/login", methods=["POST"])
+def login():
+    data = request.json or {}
+    identity = data.get("identity", "").strip()
+    password = data.get("password", "")
+    if not identity or not password:
+        return jsonify({"ok": False, "error": "Please fill in all fields."}), 400
+
+    # Allow login by username or email
+    user = User.query.filter_by(username=identity).first()
+    if not user:
+        user = User.query.filter_by(email=identity.lower()).first()
+    if not user or not user.check_password(password):
+        return jsonify({"ok": False, "error": "Invalid username or password."}), 401
+
+    session["user_id"] = user.id
+    return jsonify({"ok": True})
+
+
+@app.route("/register", methods=["POST"])
+def register():
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    email = data.get("email", "").strip().lower()
+    password = data.get("password", "")
+
+    if not username or not email or not password:
+        return jsonify({"ok": False, "error": "Please fill in all fields."}), 400
+    if not _valid_username(username):
+        return jsonify({"ok": False, "error": "Username must be 2-30 characters, start with a letter, and contain only letters, numbers, hyphens, or underscores."}), 400
+    if len(password) < 8:
+        return jsonify({"ok": False, "error": "Password must be at least 8 characters."}), 400
+    if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
+        return jsonify({"ok": False, "error": "Please enter a valid email address."}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({"ok": False, "error": "Username already taken."}), 409
+    if User.query.filter_by(email=email).first():
+        return jsonify({"ok": False, "error": "An account with that email already exists."}), 409
+
+    user = User(username=username, email=email)
+    user.set_password(password)
+    db.session.add(user)
+    db.session.commit()
+
+    session["user_id"] = user.id
+    return jsonify({"ok": True})
+
+
+@app.route("/guest", methods=["POST"])
+def guest_login():
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"ok": False, "error": "Please enter a name."}), 400
+    if not re.match(r'^[A-Za-z][A-Za-z0-9 _\-]{1,19}$', name):
+        return jsonify({"ok": False, "error": "Name must be 2–20 characters, start with a letter, and contain only letters, numbers, spaces, hyphens, or underscores."}), 400
+    session.pop("user_id", None)
+    session["guest_name"] = name
+    return jsonify({"ok": True})
+
+
+@app.route("/logout")
+def logout():
+    session.pop("user_id", None)
+    session.pop("guest_name", None)
+    return redirect(url_for("login_page"))
+
+
+# ---------------------------------------------------------------------------
+# HTTP Routes — Google OAuth
+# ---------------------------------------------------------------------------
+
+@app.route("/auth/google")
+def google_auth():
+    if not GOOGLE_ENABLED:
+        return redirect(url_for("login_page"))
+    state = secrets.token_urlsafe(16)
+    session["oauth_state"] = state
+    redirect_uri = GOOGLE_REDIRECT_URI or url_for("google_callback", _external=True)
+    params = urlparse.urlencode({
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "state": state,
+        "access_type": "online",
+    })
+    return redirect(f"https://accounts.google.com/o/oauth2/v2/auth?{params}")
+
+
+@app.route("/auth/google/callback")
+def google_callback():
+    if not GOOGLE_ENABLED:
+        return redirect(url_for("login_page"))
+
+    state = request.args.get("state")
+    if state != session.pop("oauth_state", None):
+        return redirect(url_for("login_page"))
+    if request.args.get("error"):
+        return redirect(url_for("login_page"))
+
+    code = request.args.get("code")
+    redirect_uri = GOOGLE_REDIRECT_URI or url_for("google_callback", _external=True)
+
+    try:
+        token_data = _google_post("https://oauth2.googleapis.com/token", {
+            "code": code,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        })
+        access_token = token_data.get("access_token")
+        if not access_token:
+            return redirect(url_for("login_page"))
+
+        user_info = _google_get(
+            "https://www.googleapis.com/oauth2/v3/userinfo", access_token)
+    except Exception:
+        return redirect(url_for("login_page"))
+
+    google_id = user_info.get("sub")
+    email = user_info.get("email", "").lower()
+    given_name = user_info.get("given_name", "")
+    if not google_id:
+        return redirect(url_for("login_page"))
+
+    user = User.query.filter_by(google_id=google_id).first()
+    if not user:
+        user = User.query.filter_by(email=email).first()
+        if user:
+            user.google_id = google_id
+            db.session.commit()
+        else:
+            # New Google user — pick a username
+            session["pending_google"] = {
+                "google_id": google_id,
+                "email": email,
+                "name": given_name,
+            }
+            return redirect(url_for("login_page", google_setup=1))
+
+    session["user_id"] = user.id
+    return redirect(url_for("lobbies"))
+
+
+@app.route("/auth/google/setup", methods=["POST"])
+def google_setup():
+    pending = session.get("pending_google")
+    if not pending:
+        return jsonify({"ok": False, "error": "No pending Google login."}), 400
+
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    if not _valid_username(username):
+        return jsonify({"ok": False, "error": "Username must be 2-30 characters, start with a letter, and contain only letters, numbers, hyphens, or underscores."}), 400
+    if User.query.filter_by(username=username).first():
+        return jsonify({"ok": False, "error": "Username already taken."}), 409
+
+    user = User(username=username, email=pending["email"],
+                google_id=pending["google_id"])
+    db.session.add(user)
+    db.session.commit()
+
+    session.pop("pending_google", None)
+    session["user_id"] = user.id
+    return jsonify({"ok": True})
+
+
+# ---------------------------------------------------------------------------
+# HTTP Routes — Lobbies & Game
+# ---------------------------------------------------------------------------
+
+@app.route("/lobbies")
+@require_login
+def lobbies():
+    user = get_current_user()
+    guest_name = session.get("guest_name") if not user else None
+    public_games = (Game.query
+                    .filter_by(status="waiting", is_private=False)
+                    .order_by(Game.created_at.desc())
+                    .all())
+    ongoing_games = (Game.query
+                     .filter_by(status="playing", is_private=False)
+                     .order_by(Game.created_at.desc())
+                     .all())
+    return render_template("lobbies.html", user=user, guest_name=guest_name,
+                           games=public_games, ongoing_games=ongoing_games)
 
 
 @app.route("/create", methods=["POST"])
+@require_login
 def create_game():
-    name = request.json.get("name", "").strip()
-    max_players = int(request.json.get("max_players", 6))
-    if not name:
-        return jsonify({"ok": False, "error": "Name required."}), 400
+    player_name = get_effective_name()
+    data = request.json or {}
+    max_players = int(data.get("max_players", 6))
+    is_private = bool(data.get("is_private", False))
+    passcode = data.get("passcode", "").strip() if is_private else None
 
     sk = get_session_key()
     code = _make_game_code()
 
-    game = Game(code=code, max_players=max(2, min(6, max_players)))
+    game = Game(code=code, max_players=max(2, min(6, max_players)),
+                is_private=is_private, passcode=passcode or None)
     db.session.add(game)
     db.session.flush()
 
@@ -94,7 +367,7 @@ def create_game():
     player = Player(
         game_id=game.id,
         session_key=sk,
-        name=name,
+        name=player_name,
         color=color,
         turn_order=0,
         is_host=True,
@@ -106,21 +379,26 @@ def create_game():
 
 
 @app.route("/join", methods=["POST"])
+@require_login
 def join_game_http():
-    name = request.json.get("name", "").strip()
-    code = request.json.get("code", "").strip().upper()
-    if not name or not code:
-        return jsonify({"ok": False, "error": "Name and code required."}), 400
+    player_name = get_effective_name()
+    data = request.json or {}
+    code = data.get("code", "").strip().upper()
+    passcode = data.get("passcode", "").strip()
+
+    if not code:
+        return jsonify({"ok": False, "error": "Game code required."}), 400
 
     game = Game.query.filter_by(code=code).first()
     if not game:
         return jsonify({"ok": False, "error": "Game not found."}), 404
     if game.status != "waiting":
         return jsonify({"ok": False, "error": "Game already started."}), 400
+    if game.is_private and game.passcode and game.passcode != passcode:
+        return jsonify({"ok": False, "error": "Incorrect passcode."}), 403
 
     sk = get_session_key()
 
-    # Already in game?
     existing = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if existing:
         return jsonify({"ok": True, "code": code})
@@ -136,7 +414,7 @@ def join_game_http():
     player = Player(
         game_id=game.id,
         session_key=sk,
-        name=name,
+        name=player_name,
         color=available[0],
         turn_order=len(game.players),
         is_host=False,
@@ -149,18 +427,21 @@ def join_game_http():
 
 
 @app.route("/lobby/<code>")
+@require_login
 def lobby(code):
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
     if not player:
-        return redirect(url_for("index", join=code.upper()))
+        return redirect(url_for("lobbies"))
     if game.status == "playing":
         return redirect(url_for("game_page", code=code.upper()))
     return render_template("lobby.html", game=game, player=player)
 
 
 @app.route("/game/<code>")
+@require_login
 def game_page(code):
+    user = get_current_user()
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
     is_spectator = player is None
@@ -168,7 +449,7 @@ def game_page(code):
         if player:
             return redirect(url_for("lobby", code=code.upper()))
         else:
-            return redirect(url_for("index", join=code.upper()))
+            return redirect(url_for("lobbies"))
 
     board_data = {
         "cities": {k: list(v) for k, v in CITIES.items()},
@@ -183,9 +464,10 @@ def game_page(code):
     music_files = sorted(
         f for f in os.listdir(music_dir) if f.lower().endswith(".mp3")
     ) if os.path.isdir(music_dir) else []
+    guest_name = session.get("guest_name") if not user else None
     return render_template("game.html", game=game, player=player,
                            board_data=board_data, music_files=music_files,
-                           is_spectator=is_spectator)
+                           is_spectator=is_spectator, user=user, guest_name=guest_name)
 
 
 # ---------------------------------------------------------------------------
@@ -224,7 +506,6 @@ def on_start_game(data):
     if game.status != "waiting":
         return
 
-    # Assign random turn order
     players_list = list(game.players)
     random.shuffle(players_list)
     for i, p in enumerate(players_list):
@@ -244,7 +525,6 @@ def on_start_game(data):
 @socketio.on("join_game_room")
 def on_join_game_room(data):
     code = data.get("code", "").upper()
-    spectator_name = data.get("spectator_name", "").strip()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
     if not game:
@@ -252,15 +532,23 @@ def on_join_game_room(data):
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     join_room(code)
     state = game.state
+    bot_ids = [str(p.id) for p in game.players if p.session_key.startswith("bot_")]
+    host_id = next((str(p.id) for p in game.players if p.is_host), None)
     if player:
         pub = logic.get_public_state(state, str(player.id))
         pub["my_player_id"] = str(player.id)
         pub["my_color"] = player.color
+        pub["is_host"] = player.is_host
+        pub["host_player_id"] = host_id
+        pub["bot_player_ids"] = bot_ids
         emit("game_state", pub)
     else:
         pub = logic.get_public_state(state, "")
         pub["is_spectator"] = True
+        pub["host_player_id"] = host_id
+        pub["bot_player_ids"] = bot_ids
         emit("game_state", pub)
+        spectator_name = data.get("spectator_name", "").strip()
         if spectator_name:
             socketio.emit("spectator_joined", {"name": spectator_name}, to=code)
 
@@ -299,6 +587,39 @@ def on_add_bot(data):
     db.session.add(bot)
     db.session.commit()
     socketio.emit("player_joined", game.to_lobby_dict(), to=code)
+
+
+@socketio.on("kick_player")
+def on_kick_player(data):
+    code = data.get("code", "").upper()
+    target_id = data.get("player_id")
+    sk = get_session_key()
+
+    game = Game.query.filter_by(code=code).first()
+    if not game:
+        return
+
+    host = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if not host or not host.is_host:
+        emit("error", {"message": "Only the host can kick players."})
+        return
+
+    target = Player.query.filter_by(game_id=game.id, id=target_id).first()
+    if not target or target.is_host:
+        return
+
+    # Notify all clients before state changes so kicked player can redirect
+    socketio.emit("player_kicked", {"player_id": target_id}, to=code)
+
+    if game.status == "waiting":
+        db.session.delete(target)
+        db.session.commit()
+        socketio.emit("player_joined", game.to_lobby_dict(), to=code)
+    else:
+        # Convert to bot so turns auto-play; real player will be redirected by event
+        target.session_key = f"bot_kicked_{uuid.uuid4()}"
+        db.session.commit()
+        _run_bots(game, code)
 
 
 @socketio.on("keep_initial_tickets")
@@ -387,24 +708,28 @@ def _player_action(code: str, action_fn):
 
 
 def _broadcast_state(game: Game, code: str):
-    """Send each player their personalized view of the game state."""
     state = game.state
+    bot_ids = [str(p.id) for p in game.players if p.session_key.startswith("bot_")]
+    host_id = next((str(p.id) for p in game.players if p.is_host), None)
     for p in game.players:
         if p.session_key.startswith("bot_"):
-            continue  # bots have no socket connection
+            continue
         pub = logic.get_public_state(state, str(p.id))
         pub["my_player_id"] = str(p.id)
         pub["my_color"] = p.color
+        pub["is_host"] = p.is_host
+        pub["host_player_id"] = host_id
+        pub["bot_player_ids"] = bot_ids
         socketio.emit("game_state", pub, to=p.session_key)
 
-    # Also send a generic update to the room (for non-personal data like claimed routes)
     generic = logic.get_public_state(state, "")
+    generic["host_player_id"] = host_id
+    generic["bot_player_ids"] = bot_ids
     socketio.emit("game_state_update", generic, to=code)
 
 
 def _run_bots(game: Game, code: str):
-    """Auto-play any bot turns until the current player is human."""
-    for _ in range(100):  # safety cap
+    for _ in range(100):
         state = game.state
         phase = state.get("phase")
 
@@ -445,7 +770,6 @@ def _run_bots(game: Game, code: str):
 
 @socketio.on("register_session")
 def on_register_session(data=None):
-    """Allow client to register its session key as a Socket.IO room for personal messages."""
     sk = get_session_key()
     join_room(sk)
 

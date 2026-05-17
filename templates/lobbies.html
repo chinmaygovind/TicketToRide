@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}Ticket to Ride — Lobbies{% endblock %}
+
+{% block body %}
+<div class="lobbies-bg">
+
+  <!-- Header -->
+  <div class="lobbies-header">
+    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
+    <div class="lobbies-user">
+      {% if user %}
+        <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+        <a href="/logout" class="btn-logout">LOGOUT</a>
+      {% else %}
+        <span class="lobbies-username">Playing as <strong>{{ guest_name }}</strong> <span class="guest-badge">GUEST</span></span>
+        <a href="/login?register=1" class="btn-create-account">Create Account</a>
+        <a href="/logout" class="btn-logout">EXIT</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Body -->
+  <div class="lobbies-body">
+
+    <!-- Action row -->
+    <div class="lobbies-actions">
+      <button class="btn-primary" id="create-game-btn"
+              style="width:auto;margin:0;padding:0.75rem 2rem;font-size:0.95rem;">
+        + Create Game
+      </button>
+      <div class="code-join-form">
+        <input type="text" class="code-join-input" id="join-code-input"
+               placeholder="GAME CODE" maxlength="6" autocomplete="off"/>
+        <button class="btn-secondary" id="join-code-btn"
+                style="width:auto;margin:0;padding:0.65rem 1.2rem;">
+          Join
+        </button>
+      </div>
+    </div>
+
+    <div id="join-error" class="error-msg hidden" style="margin-bottom:1rem;"></div>
+
+    <!-- Public games -->
+    <div class="lobbies-section-title">AVAILABLE GAMES</div>
+    <div class="lobby-list" id="lobby-list">
+      {% if games %}
+        {% for game in games %}
+        {% set host = game.players | selectattr('is_host') | list | first %}
+        <div class="lobby-card">
+          <div class="lobby-card-info">
+            <div class="lobby-card-host">
+              <strong>{{ host.name if host else 'Unknown' }}</strong>'s Game
+            </div>
+            <div class="lobby-card-meta">
+              {{ game.players | length }} / {{ game.max_players }} players &nbsp;·&nbsp; Waiting to start
+            </div>
+          </div>
+          <span class="lobby-card-badge badge-public">PUBLIC</span>
+          <button class="btn-join-lobby" onclick="joinGame('{{ game.code }}')">Join</button>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="lobby-empty">
+          <div style="font-size:2rem;margin-bottom:0.75rem;">🚂</div>
+          No public games right now. Create one and invite some friends!
+        </div>
+      {% endif %}
+    </div>
+
+    <!-- Ongoing games (spectate) -->
+    {% if ongoing_games %}
+    <div class="lobbies-section-title" style="margin-top:2rem;">ONGOING GAMES — SPECTATE</div>
+    <div class="lobby-list">
+      {% for game in ongoing_games %}
+      {% set host = game.players | selectattr('is_host') | list | first %}
+      <div class="lobby-card">
+        <div class="lobby-card-info">
+          <div class="lobby-card-host">
+            <strong>{{ host.name if host else 'Unknown' }}</strong>'s Game
+          </div>
+          <div class="lobby-card-meta">
+            {{ game.players | length }} players &nbsp;·&nbsp; In progress
+          </div>
+        </div>
+        <span class="lobby-card-badge badge-ongoing">LIVE</span>
+        <a href="/game/{{ game.code }}" class="btn-spectate-lobby">👀 Spectate</a>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+  </div>
+</div>
+
+<!-- Create game modal -->
+<div class="create-modal-overlay" id="create-modal">
+  <div class="create-modal-backdrop" id="create-backdrop"></div>
+  <div class="create-modal-box">
+    <h2>Create New Game</h2>
+
+    <div style="margin-bottom:1.2rem;">
+      <div class="create-field-label">MAX PLAYERS</div>
+      <div class="player-count-select">
+        {% for n in range(2, 7) %}
+        <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div style="margin-bottom:1rem;">
+      <div class="create-field-label">VISIBILITY</div>
+      <div class="visibility-toggle">
+        <button class="vis-btn active" id="vis-public">🌐 Public</button>
+        <button class="vis-btn" id="vis-private">🔒 Private</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.4rem;">
+        Public games appear in the lobby list. Private games require a passcode to join.
+      </p>
+    </div>
+
+    <div class="passcode-field" id="passcode-field">
+      <div class="create-field-label">PASSCODE</div>
+      <input type="text" id="create-passcode"
+             placeholder="4–20 characters, share with friends"
+             maxlength="20" autocomplete="off" class="create-passcode-input"/>
+    </div>
+
+    <div id="create-error" class="error-msg hidden" style="margin-top:1rem;"></div>
+
+    <div class="modal-footer" style="margin-top:1.5rem;">
+      <button class="btn-secondary" id="create-cancel-btn"
+              style="width:auto;margin:0;padding:0.6rem 1.5rem;">Cancel</button>
+      <button class="btn-primary" id="create-confirm-btn"
+              style="width:auto;margin:0;padding:0.6rem 1.8rem;">Create Game</button>
+    </div>
+  </div>
+</div>
+
+<!-- Passcode prompt modal (private games joined by code) -->
+<div class="create-modal-overlay" id="passcode-modal">
+  <div class="create-modal-backdrop" id="passcode-backdrop"></div>
+  <div class="create-modal-box" style="max-width:380px;">
+    <h2>🔒 Private Game</h2>
+    <p style="color:var(--text-muted);font-size:0.92rem;margin-bottom:1rem;">
+      Enter the passcode to join this game.
+    </p>
+    <input type="text" id="passcode-prompt-input"
+           placeholder="Passcode" maxlength="20" autocomplete="off"
+           class="create-passcode-input"/>
+    <div id="passcode-error" class="error-msg hidden" style="margin-top:0.5rem;"></div>
+    <div class="modal-footer" style="margin-top:1.2rem;">
+      <button class="btn-secondary" id="passcode-cancel-btn"
+              style="width:auto;margin:0;padding:0.6rem 1.5rem;">Cancel</button>
+      <button class="btn-primary" id="passcode-confirm-btn"
+              style="width:auto;margin:0;padding:0.6rem 1.8rem;">Join Game</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+let selectedMaxPlayers = 4;
+let isPrivate = false;
+let pendingJoinCode = null;
+
+// Max players selector
+document.querySelectorAll('.count-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    selectedMaxPlayers = parseInt(btn.dataset.count);
+  });
+});
+
+// Visibility toggle
+document.getElementById('vis-public').addEventListener('click', () => setVisibility(false));
+document.getElementById('vis-private').addEventListener('click', () => setVisibility(true));
+
+function setVisibility(priv) {
+  isPrivate = priv;
+  document.getElementById('vis-public').classList.toggle('active', !priv);
+  document.getElementById('vis-private').classList.toggle('active', priv);
+  document.getElementById('passcode-field').classList.toggle('visible', priv);
+}
+
+function showError(id, msg) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.classList.remove('hidden');
+  setTimeout(() => el.classList.add('hidden'), 6000);
+}
+
+// Create modal
+document.getElementById('create-game-btn').addEventListener('click', () => {
+  document.getElementById('create-modal').classList.add('visible');
+});
+document.getElementById('create-cancel-btn').addEventListener('click', closeCreateModal);
+document.getElementById('create-backdrop').addEventListener('click', closeCreateModal);
+
+function closeCreateModal() {
+  document.getElementById('create-modal').classList.remove('visible');
+  document.getElementById('create-error').classList.add('hidden');
+}
+
+document.getElementById('create-confirm-btn').addEventListener('click', async () => {
+  const passcode = isPrivate ? document.getElementById('create-passcode').value.trim() : null;
+  if (isPrivate && (!passcode || passcode.length < 4)) {
+    showError('create-error', 'Passcode must be at least 4 characters.');
+    return;
+  }
+  const btn = document.getElementById('create-confirm-btn');
+  btn.disabled = true;
+  const res = await fetch('/create', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ max_players: selectedMaxPlayers, is_private: isPrivate, passcode })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    window.location.href = '/lobby/' + data.code;
+  } else {
+    showError('create-error', data.error || 'Failed to create game.');
+    btn.disabled = false;
+  }
+});
+
+// Join by code
+document.getElementById('join-code-btn').addEventListener('click', () => {
+  const code = document.getElementById('join-code-input').value.trim().toUpperCase();
+  if (code.length !== 6) { showError('join-error', 'Please enter a 6-character game code.'); return; }
+  joinGame(code);
+});
+
+document.getElementById('join-code-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('join-code-btn').click();
+});
+
+document.getElementById('join-code-input').addEventListener('input', function() {
+  this.value = this.value.toUpperCase();
+});
+
+async function joinGame(code, passcode) {
+  const res = await fetch('/join', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ code, passcode: passcode || '' })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    window.location.href = '/lobby/' + data.code;
+  } else if (res.status === 403) {
+    // Private game — prompt for passcode
+    pendingJoinCode = code;
+    document.getElementById('passcode-prompt-input').value = '';
+    document.getElementById('passcode-error').classList.add('hidden');
+    document.getElementById('passcode-modal').classList.add('visible');
+    setTimeout(() => document.getElementById('passcode-prompt-input').focus(), 80);
+  } else {
+    showError('join-error', data.error || 'Failed to join game.');
+  }
+}
+
+// Passcode modal
+document.getElementById('passcode-cancel-btn').addEventListener('click', closePasscodeModal);
+document.getElementById('passcode-backdrop').addEventListener('click', closePasscodeModal);
+
+function closePasscodeModal() {
+  document.getElementById('passcode-modal').classList.remove('visible');
+  pendingJoinCode = null;
+}
+
+document.getElementById('passcode-confirm-btn').addEventListener('click', async () => {
+  const passcode = document.getElementById('passcode-prompt-input').value.trim();
+  if (!passcode) {
+    showError('passcode-error', 'Please enter the passcode.');
+    return;
+  }
+  if (!pendingJoinCode) return;
+  const btn = document.getElementById('passcode-confirm-btn');
+  btn.disabled = true;
+  const res = await fetch('/join', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ code: pendingJoinCode, passcode })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    window.location.href = '/lobby/' + data.code;
+  } else {
+    showError('passcode-error', data.error || 'Incorrect passcode.');
+    btn.disabled = false;
+  }
+});
+
+document.getElementById('passcode-prompt-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('passcode-confirm-btn').click();
+});
+
+// Escape closes any open modal
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    closeCreateModal();
+    closePasscodeModal();
+  }
+});
+</script>
+{% endblock %}

@@ -56,7 +56,7 @@
       </div>
     </div>
     <div class="sidebar-section action-log-section">
-      <div class="sidebar-label">ACTION LOG</div>
+      <div class="sidebar-label" id="action-log-label">ACTION LOG</div>
       <div id="action-log" class="action-log"></div>
     </div>
     <div class="sidebar-section scoring-section">
@@ -91,10 +91,31 @@
 
 </div>
 
+<!-- Mobile tab bar (desktop: hidden via CSS) -->
+<div class="mobile-tab-bar">
+  <button class="mobile-tab" data-panel="left">
+    <span class="mobile-tab-icon">🃏</span>
+    <span>Cards</span>
+  </button>
+  <button class="mobile-tab active" data-panel="board">
+    <span class="mobile-tab-icon">🗺</span>
+    <span>Board</span>
+  </button>
+  <button class="mobile-tab" data-panel="right">
+    <span class="mobile-tab-icon">📋</span>
+    <span>Tickets</span>
+  </button>
+</div>
+
+<!-- Mobile zoom controls (desktop: hidden via CSS) -->
+<div class="mobile-zoom-controls">
+  <button class="mobile-zoom-btn" id="zoom-in-btn" title="Zoom In">+</button>
+  <button class="mobile-zoom-btn" id="zoom-out-btn" title="Zoom Out">−</button>
+</div>
+
 
 <!-- ===== MODALS ===== -->
 
-<!-- Spectator name entry -->
 {% if is_spectator %}
 <div id="spectator-modal" class="modal">
   <div class="modal-backdrop"></div>
@@ -103,7 +124,7 @@
     <p class="modal-desc">Enter your name so players know you're watching.</p>
     <input type="text" id="spectator-name-input" placeholder="Your name" maxlength="20" autocomplete="off"
            style="width:100%;padding:10px;margin:8px 0 16px;font-size:1.1rem;border-radius:6px;
-                  border:1px solid var(--border);background:var(--panel);color:var(--text);box-sizing:border-box;"/>
+                  border:1px solid var(--border);background:var(--bg-panel);color:var(--text);box-sizing:border-box;"/>
     <div class="modal-footer">
       <button class="btn-primary" id="spectator-watch-btn">Watch Game</button>
     </div>
@@ -111,7 +132,6 @@
 </div>
 {% endif %}
 
-<!-- Initial / Draw ticket selection modal -->
 <div id="ticket-modal" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box">
@@ -124,7 +144,6 @@
   </div>
 </div>
 
-<!-- Claim route modal (card selection) -->
 <div id="claim-modal" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box">
@@ -138,26 +157,25 @@
   </div>
 </div>
 
-<!-- Game Over modal -->
 <div id="gameover-modal" class="modal hidden">
   <div class="modal-backdrop"></div>
   <div class="modal-box wide">
     <h2>🏆 Game Over!</h2>
     <div id="final-scores" class="final-scores"></div>
     <div class="modal-footer">
-      <a href="/" class="btn-primary">Play Again</a>
+      <a href="/lobbies" class="btn-primary">Play Again</a>
     </div>
   </div>
 </div>
 
 <script>
-// ── Board data injected from server ──────────────────────────────────────────
-const BOARD_DATA   = {{ board_data | tojson }};
-const GAME_CODE    = "{{ game.code }}";
-const MY_PLAYER_ID = "{{ player.id if player else '' }}";
-const MY_COLOR     = "{{ player.color if player else '' }}";
-const IS_SPECTATOR = {{ 'true' if is_spectator else 'false' }};
-const MUSIC_FILES  = {{ music_files | tojson }};
+const BOARD_DATA    = {{ board_data | tojson }};
+const GAME_CODE     = "{{ game.code }}";
+const MY_PLAYER_ID  = "{{ player.id if player else '' }}";
+const MY_COLOR      = "{{ player.color if player else '' }}";
+const IS_SPECTATOR  = {{ 'true' if is_spectator else 'false' }};
+const MUSIC_FILES   = {{ music_files | tojson }};
+const SPECTATOR_NAME = "{{ (user.username if user else guest_name) if is_spectator else '' }}";
 </script>
 {% endblock %}
 

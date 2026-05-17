@@ -1,8 +1,28 @@
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 import json
+from werkzeug.security import generate_password_hash, check_password_hash
 
 db = SQLAlchemy()
+
+
+class User(db.Model):
+    __tablename__ = "users"
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(30), unique=True, nullable=False)
+    email = db.Column(db.String(120), unique=True, nullable=False)
+    password_hash = db.Column(db.String(256), nullable=True)
+    google_id = db.Column(db.String(64), unique=True, nullable=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def set_password(self, pw):
+        self.password_hash = generate_password_hash(pw)
+
+    def check_password(self, pw):
+        if not self.password_hash:
+            return False
+        return check_password_hash(self.password_hash, pw)
 
 
 class Game(db.Model):
@@ -12,9 +32,11 @@ class Game(db.Model):
     code = db.Column(db.String(6), unique=True, nullable=False, index=True)
     status = db.Column(db.String(20), default="waiting")  # waiting | playing | ended
     max_players = db.Column(db.Integer, default=6)
+    is_private = db.Column(db.Boolean, default=False)
+    passcode = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Full serialized game state as JSON text (avoids requiring JSONB dialect)
+    # Full serialized game state as JSON text
     state_json = db.Column(db.Text, default="{}")
 
     players = db.relationship("Player", backref="game", lazy=True,
@@ -33,6 +55,7 @@ class Game(db.Model):
             "code": self.code,
             "status": self.status,
             "max_players": self.max_players,
+            "is_private": self.is_private,
             "player_count": len(self.players),
             "players": [p.to_dict() for p in self.players],
         }
