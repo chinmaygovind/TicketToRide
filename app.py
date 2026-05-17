@@ -11,6 +11,7 @@ import json as json_mod
 import urllib.request as urlreq
 import urllib.parse as urlparse
 from functools import wraps
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -55,6 +56,7 @@ with app.app_context():
     _migration_stmts = [
         "ALTER TABLE games ADD COLUMN is_private BOOLEAN DEFAULT 0",
         "ALTER TABLE games ADD COLUMN passcode VARCHAR(20)",
+        "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
     ]
     with db.engine.connect() as _conn:
         for _stmt in _migration_stmts:
@@ -511,6 +513,7 @@ def on_start_game(data):
     for i, p in enumerate(players_list):
         p.turn_order = i
     game.status = "playing"
+    game.last_activity_at = datetime.utcnow()
 
     players_data = [{"id": p.id, "name": p.name, "color": p.color, "turn_order": p.turn_order}
                     for p in players_list]
@@ -708,6 +711,8 @@ def _player_action(code: str, action_fn):
 
 
 def _broadcast_state(game: Game, code: str):
+    game.last_activity_at = datetime.utcnow()
+    db.session.commit()
     state = game.state
     bot_ids = [str(p.id) for p in game.players if p.session_key.startswith("bot_")]
     host_id = next((str(p.id) for p in game.players if p.is_host), None)
@@ -780,6 +785,31 @@ def on_get_all_tickets():
 
 
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Background: end games inactive for >20 minutes
+# ---------------------------------------------------------------------------
+
+def _stale_game_cleanup():
+    INACTIVITY_LIMIT = timedelta(minutes=20)
+    while True:
+        eventlet.sleep(5 * 60)  # check every 5 minutes
+        with app.app_context():
+            cutoff = datetime.utcnow() - INACTIVITY_LIMIT
+            stale = Game.query.filter(
+                Game.status == "playing",
+                Game.last_activity_at < cutoff,
+            ).all()
+            for game in stale:
+                game.status = "ended"
+                db.session.commit()
+                socketio.emit("game_over", {
+                    "reason": "Game ended due to inactivity.",
+                    "scores": {},
+                }, to=game.code)
+
+eventlet.spawn(_stale_game_cleanup)
+
+
 # Run
 # ---------------------------------------------------------------------------
 

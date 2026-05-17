@@ -35,6 +35,7 @@ class Game(db.Model):
     is_private = db.Column(db.Boolean, default=False)
     passcode = db.Column(db.String(20), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_activity_at = db.Column(db.DateTime, nullable=True)
 
     # Full serialized game state as JSON text
     state_json = db.Column(db.Text, default="{}")
