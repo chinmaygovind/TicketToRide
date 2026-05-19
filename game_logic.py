@@ -298,8 +298,8 @@ def claim_route(state: dict, player_id: str, route_id: int, cards_to_use: dict) 
     state["claimed_routes"][route_id_str] = player_id
     _log(state, f"{ps['name']} claimed {route['city1']}–{route['city2']} (+{points} pts).")
 
-    # Check end game trigger
-    if ps["trains"] <= 2:
+    # Check end game trigger (only once — guard against re-trigger in final_round)
+    if ps["trains"] <= 2 and state["phase"] == "main":
         _trigger_final_round(state, player_id)
     else:
         _next_turn(state)
@@ -384,21 +384,21 @@ def _next_turn(state: dict):
 
 
 def _trigger_final_round(state: dict, triggering_player_id: str):
-    """Set up the final round: all other players get one last turn, then the triggering player gets one final turn."""
+    """Set up the final round: only players AFTER the triggering player get one last turn."""
     state["phase"] = "final_round"
     state["final_round_triggered_by"] = triggering_player_id
     order = state["turn_order"]
     idx = order.index(triggering_player_id)
-    # Players after the trigger go first, then the triggering player gets the very last turn
+    # Triggering player already took their turn — only those after them get one final turn
     remaining = [order[(idx + i + 1) % len(order)] for i in range(len(order) - 1)]
-    remaining.append(triggering_player_id)
     state["final_round_players_left"] = remaining
-
-    state["current_player_id"] = order[(idx + 1) % len(order)]
-    state["draw_step"] = 0
 
     if not remaining:
         _end_game(state)
+        return
+
+    state["current_player_id"] = order[(idx + 1) % len(order)]
+    state["draw_step"] = 0
 
 
 # ---------------------------------------------------------------------------

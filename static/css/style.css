@@ -577,7 +577,7 @@ html, body {
 .player-row-trains { font-size: 0.72rem; color: var(--text-muted); margin-left: 2px; }
 .player-row-tickets { font-size: 0.72rem; color: var(--text-muted); margin-left: 4px; }
 .kick-btn {
-  margin-left: auto;
+  margin-right: 0.3rem;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 4px;

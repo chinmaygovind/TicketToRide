@@ -791,13 +791,16 @@ def on_get_all_tickets():
 
 def _stale_game_cleanup():
     INACTIVITY_LIMIT = timedelta(minutes=20)
-    while True:
-        eventlet.sleep(5 * 60)  # check every 5 minutes
+
+    def _run_cleanup():
         with app.app_context():
             cutoff = datetime.utcnow() - INACTIVITY_LIMIT
             stale = Game.query.filter(
                 Game.status == "playing",
-                Game.last_activity_at < cutoff,
+                db.or_(
+                    Game.last_activity_at == None,   # noqa: E711 — SQL None check
+                    Game.last_activity_at < cutoff,
+                ),
             ).all()
             for game in stale:
                 game.status = "ended"
@@ -806,6 +809,11 @@ def _stale_game_cleanup():
                     "reason": "Game ended due to inactivity.",
                     "scores": {},
                 }, to=game.code)
+
+    _run_cleanup()  # immediate pass on startup
+    while True:
+        eventlet.sleep(5 * 60)  # then every 5 minutes
+        _run_cleanup()
 
 eventlet.spawn(_stale_game_cleanup)
 

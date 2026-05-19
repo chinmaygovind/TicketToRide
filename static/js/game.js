@@ -12,6 +12,7 @@ let pendingRouteId = null;
 let prevCurrentPlayerId = null;
 let prevPhase = null;
 let lastKnownActionLogEntry = '';
+let prevClaimedCount = 0;
 
 // ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
 let soundEnabled = true;
@@ -266,6 +267,7 @@ document.getElementById('players-panel').addEventListener('click', e => {
 });
 
 socket.on('game_state', (state) => {
+  const newClaimedCount = Object.keys(state.claimed_routes || {}).length;
   // Detect your-turn transition before overwriting gameState
   if (gameState &&
       gameState.current_player_id !== MY_PLAYER_ID &&
@@ -274,6 +276,11 @@ socket.on('game_state', (state) => {
     playSound('your_turn');
     showToast('🎯 Your turn!', '#22c55e', 3000);
   }
+  // Play train placement sound only on a successful claim (routes count increased while it was my turn)
+  if (gameState && prevCurrentPlayerId === MY_PLAYER_ID && newClaimedCount > prevClaimedCount) {
+    playSound('place_trains');
+  }
+  prevClaimedCount = newClaimedCount;
   prevCurrentPlayerId = state.current_player_id;
   prevPhase = state.phase;
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
@@ -700,11 +707,10 @@ function renderPlayersPanel() {
     const canKick = amHost && !isMe && !IS_SPECTATOR;
     return `<div class="player-row ${isActive ? 'active-turn' : ''}" data-pid="${pid}">
       <div class="player-color-dot" style="background:${PLAYER_HEX[p.color]};box-shadow:0 0 5px ${PLAYER_HEX[p.color]};"></div>
-      <span class="player-row-name">${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}${isBot ? ' <span style="color:var(--text-muted);font-size:0.65rem;">(bot)</span>' : ''}</span>
+      <span class="player-row-name">${canKick ? `<button class="kick-btn" data-pid="${pid}" title="Kick player">✕</button>` : ''}${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}${isBot ? ' <span style="color:var(--text-muted);font-size:0.65rem;">(bot)</span>' : ''}</span>
       <span class="player-row-score">${p.route_score}</span>
       <span class="player-row-trains">🚂${p.trains}</span>
       <span class="player-row-tickets">🎫${p.ticket_count ?? 0}</span>
-      ${canKick ? `<button class="kick-btn" data-pid="${pid}" title="Kick player">✕</button>` : ''}
     </div>`;
   }).join('');
 }
@@ -1021,7 +1027,6 @@ function openClaimModal(route) {
       route_id: pendingRouteId,
       cards: selectedCombo,
     });
-    playSound('place_trains');
     closeModal('claim-modal');
   };
 
