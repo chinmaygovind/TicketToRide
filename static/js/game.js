@@ -15,6 +15,7 @@ let prevPhase = null;
 let lastKnownActionLogEntry = '';
 let prevClaimedCount = 0;
 let pendingBlindDraw = null; // hand snapshot taken before a blind draw, cleared after animation
+let _sweepInProgress = false; // true while 3-loco sweep animation is running
 
 // ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
 // Settings — persisted to localStorage
@@ -301,8 +302,15 @@ socket.on('game_state_update', (state) => {
   const oldCurrentPlayer = gameState.current_player_id;
   const oldPhase = gameState.phase;
 
+  // Detect 3-loco sweep: all 5 face-up slots changed simultaneously
+  const oldFaceUp = gameState.face_up ? [...gameState.face_up] : [];
+  const newFaceUp = state.face_up || [];
+  const numChanged = oldFaceUp.filter((c, i) => c !== newFaceUp[i]).length;
+  const isSweep = numChanged >= 5 && oldFaceUp.length === 5;
+
   gameState.claimed_routes          = state.claimed_routes;
-  gameState.face_up                 = state.face_up;
+  // Hold off updating face_up if a sweep is about to animate
+  if (!isSweep) gameState.face_up   = state.face_up;
   gameState.deck_count              = state.deck_count;
   gameState.dest_deck_count         = state.dest_deck_count;
   gameState.action_log              = state.action_log;
@@ -342,6 +350,39 @@ socket.on('game_state_update', (state) => {
   prevPhase = newPhase;
 
   renderAll();
+
+  if (isSweep) {
+    _sweepInProgress = true;
+    const area = document.getElementById('face-up-cards');
+    const cards = [...area.querySelectorAll('.train-card')];
+
+    // Stagger each card sliding out to the left
+    cards.forEach((card, i) => {
+      card.style.transition = `transform 0.28s ease ${i * 0.06}s, opacity 0.28s ease ${i * 0.06}s`;
+      card.style.transform = 'translateX(-160px)';
+      card.style.opacity = '0';
+    });
+
+    // After all cards have exited, swap in the new ones with a slide-in from the right
+    const exitDuration = 280 + (cards.length - 1) * 60 + 60; // last card finishes + small buffer
+    setTimeout(() => {
+      gameState.face_up = newFaceUp;
+      _sweepInProgress = false;
+      renderFaceUpCards();
+
+      // Animate new cards sliding in from the right
+      area.querySelectorAll('.train-card').forEach((card, i) => {
+        card.style.transition = 'none';
+        card.style.transform = 'translateX(80px)';
+        card.style.opacity = '0';
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          card.style.transition = `transform 0.25s ease ${i * 0.05}s, opacity 0.25s ease ${i * 0.05}s`;
+          card.style.transform = '';
+          card.style.opacity = '';
+        }));
+      });
+    }, exitDuration);
+  }
 });
 
 socket.on('error', (data) => {
@@ -724,7 +765,7 @@ function renderPlayersPanel() {
 // ─── Face-up cards ───────────────────────────────────────────────────────────
 
 function renderFaceUpCards() {
-  if (!gameState) return;
+  if (!gameState || _sweepInProgress) return;
   const area = document.getElementById('face-up-cards');
   const faceUp = gameState.face_up || [];
   area.innerHTML = faceUp.map((color, i) => {
