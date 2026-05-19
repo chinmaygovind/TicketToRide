@@ -1864,6 +1864,7 @@ body.spectating #draw-blind-btn { display: none; }
     -webkit-overflow-scrolling: touch;
     align-items: flex-start !important;
     justify-content: flex-start !important;
+    touch-action: pan-x pan-y;
   }
   #board-img {
     max-width: none !important;

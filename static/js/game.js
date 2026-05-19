@@ -1574,36 +1574,6 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-// ─── Mobile: swipe between tabs ──────────────────────────────────────────────
-
-function initMobileSwipe() {
-  if (window.innerWidth > 768) return;
-  const panels = ['left', 'board', 'right', 'chat'];
-  let touchStartX = 0, touchStartY = 0;
-
-  document.addEventListener('touchstart', e => {
-    touchStartX = e.touches[0].clientX;
-    touchStartY = e.touches[0].clientY;
-  }, { passive: true });
-
-  document.addEventListener('touchend', e => {
-    if (e.target.closest('#chat-panel, .modal-box')) return;
-    const dx = e.changedTouches[0].clientX - touchStartX;
-    const dy = e.changedTouches[0].clientY - touchStartY;
-    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx)) return;
-
-    const activeTab = document.querySelector('.mobile-tab.active');
-    const currentPanel = activeTab?.dataset.panel;
-    const idx = panels.indexOf(currentPanel);
-    if (idx === -1) return;
-
-    const nextIdx = dx < 0 ? Math.min(idx + 1, panels.length - 1) : Math.max(idx - 1, 0);
-    if (nextIdx !== idx) {
-      document.querySelector(`.mobile-tab[data-panel="${panels[nextIdx]}"]`)?.click();
-    }
-  }, { passive: true });
-}
-
 // ─── Mobile: tab bar & board zoom ────────────────────────────────────────────
 
 (function initMobile() {
@@ -1683,5 +1653,29 @@ function initMobileSwipe() {
     renderBoard();
   });
 
-  initMobileSwipe();
+  // Pinch-to-zoom on the board
+  const boardContainer = document.getElementById('board-container');
+  let lastPinchDist = null;
+  boardContainer.addEventListener('touchstart', e => {
+    if (e.touches.length === 2) {
+      lastPinchDist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+    } else {
+      lastPinchDist = null;
+    }
+  }, { passive: true });
+  boardContainer.addEventListener('touchmove', e => {
+    if (e.touches.length === 2 && lastPinchDist !== null) {
+      const dist = Math.hypot(
+        e.touches[0].clientX - e.touches[1].clientX,
+        e.touches[0].clientY - e.touches[1].clientY
+      );
+      mobileZoom = Math.min(Math.max(mobileZoom * (dist / lastPinchDist), 0.5), 3.0);
+      lastPinchDist = dist;
+      recalcBoardScale();
+      renderBoard();
+    }
+  }, { passive: true });
 })();
