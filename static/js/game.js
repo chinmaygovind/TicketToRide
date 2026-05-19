@@ -87,7 +87,7 @@ function playSound(name) {
 }
 
 // ─── Music player ─────────────────────────────────────────────────────────────
-let musicEnabled = true;
+let musicEnabled = false;
 let _musicQueue = [];
 let _musicIdx = 0;
 const _musicAudio = new Audio();
@@ -101,7 +101,9 @@ function _initMusic() {
     _musicIdx = (_musicIdx + 1) % _musicQueue.length;
     _loadAndPlayTrack();
   });
-  _loadAndPlayTrack();
+  // Reflect off state on button immediately
+  const btn = document.getElementById('music-toggle');
+  if (btn) btn.classList.add('audio-off');
 }
 
 function _loadAndPlayTrack() {
@@ -110,12 +112,9 @@ function _loadAndPlayTrack() {
   _musicAudio.play().catch(() => {});
 }
 
-// Single first-click handler: unlock AudioContext + start music
+// First-click handler: just unlock AudioContext (music only plays if user toggles it on)
 document.addEventListener('click', function _firstGestureHandler() {
   _unlockAudio();
-  if (musicEnabled && _musicQueue.length && _musicAudio.paused) {
-    _loadAndPlayTrack();
-  }
 }, { once: true });
 
 function toggleMusic() {
@@ -707,7 +706,7 @@ function renderPlayersPanel() {
     const canKick = amHost && !isMe && !IS_SPECTATOR;
     return `<div class="player-row ${isActive ? 'active-turn' : ''}" data-pid="${pid}">
       <div class="player-color-dot" style="background:${PLAYER_HEX[p.color]};box-shadow:0 0 5px ${PLAYER_HEX[p.color]};"></div>
-      <span class="player-row-name">${canKick ? `<button class="kick-btn" data-pid="${pid}" title="Kick player">✕</button>` : ''}${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}${isBot ? ' <span style="color:var(--text-muted);font-size:0.65rem;">(bot)</span>' : ''}</span>
+      <span class="player-row-name">${escHtml(p.name)}${isMe ? ' <span style="color:var(--gold);font-size:0.65rem;">(you)</span>' : ''}${isBot ? ' <span style="color:var(--text-muted);font-size:0.65rem;">(bot)</span>' : ''}${canKick ? ` <button class="kick-btn" data-pid="${pid}" title="Kick player">✕</button>` : ''}</span>
       <span class="player-row-score">${p.route_score}</span>
       <span class="player-row-trains">🚂${p.trains}</span>
       <span class="player-row-tickets">🎫${p.ticket_count ?? 0}</span>

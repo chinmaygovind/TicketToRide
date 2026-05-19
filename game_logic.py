@@ -487,10 +487,13 @@ def is_path_connected(state: dict, player_id: str, city1: str, city2: str) -> bo
 
 
 def longest_path(state: dict, player_id: str) -> int:
-    """DFS with backtracking to find the longest continuous path in the player's network."""
-    # Build edge list (each route segment = 1 edge of a given length)
+    """Find the longest trail (path reusing no edge, but cities OK) in the player's network.
+
+    Uses backtracking DFS over edges. Each route is a unique edge identified by its
+    index in `edges`, so parallel routes between the same two cities are treated
+    separately. Cities may be visited multiple times; edges may not.
+    """
     edges: list[tuple[str, str, int]] = []
-    edge_set: set[int] = set()  # used route IDs
     for route_id_str, pid in state["claimed_routes"].items():
         if pid == player_id:
             route = ROUTE_BY_ID[int(route_id_str)]
@@ -499,27 +502,25 @@ def longest_path(state: dict, player_id: str) -> int:
     if not edges:
         return 0
 
-    # Build adjacency with edge indices
+    # Adjacency: city -> list of (neighbor, edge_index, length)
     adj: dict[str, list[tuple[str, int, int]]] = defaultdict(list)
     for i, (c1, c2, length) in enumerate(edges):
         adj[c1].append((c2, i, length))
         adj[c2].append((c1, i, length))
 
-    cities = set()
-    for c1, c2, _ in edges:
-        cities.add(c1)
-        cities.add(c2)
-
+    cities = {c for c1, c2, _ in edges for c in (c1, c2)}
     best = [0]
 
-    def dfs(city: str, used: set[int], current_length: int):
-        best[0] = max(best[0], current_length)
-        for neighbor, edge_idx, length in adj[city]:
-            if edge_idx not in used:
-                used.add(edge_idx)
-                dfs(neighbor, used, current_length + length)
-                used.remove(edge_idx)
+    def dfs(city: str, used_edges: set[int], length: int) -> None:
+        if length > best[0]:
+            best[0] = length
+        for neighbor, edge_idx, seg_len in adj[city]:
+            if edge_idx not in used_edges:
+                used_edges.add(edge_idx)
+                dfs(neighbor, used_edges, length + seg_len)
+                used_edges.remove(edge_idx)
 
+    # Try every city as a starting point (required for non-Eulerian graphs)
     for start in cities:
         dfs(start, set(), 0)
 
