@@ -20,7 +20,7 @@
       <div class="sidebar-label">FACE-UP CARDS</div>
       <div id="face-up-cards" class="face-up-area"></div>
       <button class="draw-blind-btn" id="draw-blind-btn" title="Draw blind from deck">
-        🃏 Draw from Deck
+        🎴 Draw from Deck
         <span id="deck-count" class="deck-count">110</span>
       </button>
     </div>
@@ -96,6 +96,10 @@
   <button class="mobile-tab" data-panel="right">
     <span class="mobile-tab-icon">📋</span>
     <span>Tickets</span>
+  </button>
+  <button class="mobile-tab" data-panel="chat" id="mobile-chat-tab">
+    <span class="mobile-tab-icon">💬</span>
+    <span>Chat</span>
   </button>
 </div>
 
@@ -217,8 +221,9 @@
 </div>
 
 <div id="gameover-modal" class="modal hidden">
-  <div class="modal-backdrop"></div>
+  <div class="modal-backdrop" id="gameover-backdrop"></div>
   <div class="modal-box wide">
+    <button id="gameover-close-btn" class="modal-close-btn" title="Close and view board">✕</button>
     <h2>🏆 Game Over!</h2>
     <div id="final-scores" class="final-scores"></div>
     <div class="modal-footer">

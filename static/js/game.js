@@ -26,6 +26,7 @@ let soundEnabled        = _loadSetting('ttr_sounds', true);
 let yourTurnSoundEnabled = _loadSetting('ttr_your_turn_sound', true);
 let scoringVisible      = _loadSetting('ttr_scoring', true);
 let _gameOverSoundPlayed = false;
+let _gameOverDismissed = false;
 
 let _audioCtx = null;
 const _soundBuffers = {};   // pre-loaded decoded buffers
@@ -874,8 +875,12 @@ function renderStatusBar() {
   }
 
   if (phase === 'ended') {
-    bar.textContent = '🏁 Game over!';
+    bar.innerHTML = '🏁 Game over! &nbsp;<button id="reopen-results-btn" style="background:none;border:1px solid var(--gold);border-radius:4px;color:var(--gold);font-family:\'Cinzel\',serif;font-size:0.7rem;letter-spacing:0.06em;padding:0.1rem 0.5rem;cursor:pointer;">View Results</button>';
     bar.style.color = 'var(--gold-light)';
+    document.getElementById('reopen-results-btn').addEventListener('click', () => {
+      _gameOverDismissed = false;
+      showGameOver();
+    });
     return;
   }
 
@@ -1146,8 +1151,17 @@ function showGameOver() {
     </div>`;
   }).join('');
 
-  openModal('gameover-modal');
+  if (!_gameOverDismissed) openModal('gameover-modal');
 }
+
+document.getElementById('gameover-close-btn').addEventListener('click', () => {
+  _gameOverDismissed = true;
+  closeModal('gameover-modal');
+});
+document.getElementById('gameover-backdrop').addEventListener('click', () => {
+  _gameOverDismissed = true;
+  closeModal('gameover-modal');
+});
 
 function formatTickets(tickets) {
   if (!tickets || tickets.length === 0) return 'No tickets';
@@ -1384,10 +1398,15 @@ _initMusic();
     if (collapsed) setUnread(unreadCount + 1);
   });
 
-  // Expose focus function for keybind
+  // Expose focus function for keybind (M key)
   window._focusChat = () => {
-    if (collapsed) toggleCollapse();
-    inputEl.focus();
+    if (window.innerWidth <= 768) {
+      // Mobile: activate the chat tab
+      document.getElementById('mobile-chat-tab')?.click();
+    } else {
+      if (collapsed) toggleCollapse();
+    }
+    setTimeout(() => inputEl.focus(), 30);
   };
 })();
 
@@ -1444,17 +1463,45 @@ document.addEventListener('keydown', (e) => {
   const tabs = document.querySelectorAll('.mobile-tab');
   const leftSidebar  = document.querySelector('.left-sidebar');
   const rightSidebar = document.querySelector('.right-sidebar');
+  const chatPanel    = document.getElementById('chat-panel');
 
   function setMobileTab(panelName) {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelName));
     leftSidebar.classList.remove('mobile-open');
     rightSidebar.classList.remove('mobile-open');
+    if (chatPanel) chatPanel.classList.remove('mobile-open');
     if (panelName === 'left')  leftSidebar.classList.add('mobile-open');
     if (panelName === 'right') rightSidebar.classList.add('mobile-open');
+    if (panelName === 'chat' && chatPanel) {
+      chatPanel.classList.add('mobile-open');
+      // Clear unread badge when chat tab is opened
+      const unreadEl = document.getElementById('chat-unread');
+      if (unreadEl) unreadEl.classList.add('hidden');
+      const mobileBadge = document.getElementById('mobile-chat-badge');
+      if (mobileBadge) mobileBadge.classList.add('hidden');
+      const messagesEl = document.getElementById('chat-messages');
+      if (messagesEl) setTimeout(() => { messagesEl.scrollTop = messagesEl.scrollHeight; }, 30);
+    }
   }
 
   tabs.forEach(tab => {
     tab.addEventListener('click', () => setMobileTab(tab.dataset.panel));
+  });
+
+  // Show a red dot on the Chat tab when a new message arrives while it isn't active
+  socket.on('chat_message', () => {
+    if (!isMobile()) return;
+    const chatTab = document.getElementById('mobile-chat-tab');
+    if (!chatTab || chatTab.classList.contains('active')) return;
+    let badge = document.getElementById('mobile-chat-badge');
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.id = 'mobile-chat-badge';
+      badge.className = 'mobile-chat-badge';
+      badge.textContent = '●';
+      chatTab.querySelector('.mobile-tab-icon').appendChild(badge);
+    }
+    badge.classList.remove('hidden');
   });
 
   // Close mobile panel when tapping the board (outside the panel)
