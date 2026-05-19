@@ -14,6 +14,8 @@ class User(db.Model):
     email = db.Column(db.String(120), unique=True, nullable=False)
     password_hash = db.Column(db.String(256), nullable=True)
     google_id = db.Column(db.String(64), unique=True, nullable=True, index=True)
+    phone = db.Column(db.String(20), unique=True, nullable=True)
+    notify_new_game = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     def set_password(self, pw):

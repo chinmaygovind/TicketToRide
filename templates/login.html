@@ -107,6 +107,11 @@
             <input type="password" id="reg-password2" placeholder="repeat password"
                    autocomplete="new-password"/>
           </div>
+          <div class="login-field">
+            <label>PHONE NUMBER <span style="color:var(--text-muted);font-size:0.75em;">(optional — for game alerts)</span></label>
+            <input type="tel" id="reg-phone" placeholder="+1 555 123 4567"
+                   autocomplete="tel"/>
+          </div>
           <button class="btn-primary" id="register-btn" style="margin-top:1.2rem;width:100%;">Create Account</button>
         </div>
       </div>
@@ -230,6 +235,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
   const email     = document.getElementById('reg-email').value.trim();
   const password  = document.getElementById('reg-password').value;
   const password2 = document.getElementById('reg-password2').value;
+  const phone     = document.getElementById('reg-phone').value.trim();
   if (!username || !email || !password) { showError('register', 'Please fill in all fields.'); return; }
   if (password !== password2) { showError('register', 'Passwords do not match.'); return; }
   if (password.length < 8) { showError('register', 'Password must be at least 8 characters.'); return; }
@@ -238,7 +244,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
   const res = await fetch('/register', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ username, email, password })
+    body: JSON.stringify({ username, email, password, phone: phone || null })
   });
   const data = await res.json();
   if (data.ok) {

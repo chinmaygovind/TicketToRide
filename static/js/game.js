@@ -13,6 +13,7 @@ let prevCurrentPlayerId = null;
 let prevPhase = null;
 let lastKnownActionLogEntry = '';
 let prevClaimedCount = 0;
+let pendingBlindDraw = null; // hand snapshot taken before a blind draw, cleared after animation
 
 // ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
 let soundEnabled = true;
@@ -206,6 +207,7 @@ const CARD_BG = {
   black:      'linear-gradient(135deg, #374151, #111827)',
   red:        'linear-gradient(135deg, #dc2626, #7f1d1d)',
   locomotive: 'linear-gradient(160deg, #ef4444 0%, #f97316 18%, #eab308 38%, #22c55e 58%, #3b82f6 78%, #8b5cf6 100%)',
+  unknown:    'linear-gradient(135deg, #1e293b, #0f172a)',
 };
 
 // Player color hex map (should match server-side)
@@ -283,6 +285,19 @@ socket.on('game_state', (state) => {
   prevCurrentPlayerId = state.current_player_id;
   prevPhase = state.phase;
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
+
+  // Animate my blind draw with the real card color now that the server has told us what it was
+  if (pendingBlindDraw !== null) {
+    const newHand = state.players?.[MY_PLAYER_ID]?.hand || {};
+    let drawnColor = null;
+    for (const [color, count] of Object.entries(newHand)) {
+      if ((count || 0) > (pendingBlindDraw[color] || 0)) { drawnColor = color; break; }
+    }
+    const btn = document.getElementById('draw-blind-btn');
+    animateCardToElement(btn, 'hand-cards', drawnColor || 'locomotive');
+    pendingBlindDraw = null;
+  }
+
   gameState = state;
   if (state.is_host !== undefined) amHost = state.is_host;
   if (state.bot_player_ids) botPlayerIds = state.bot_player_ids;
@@ -413,7 +428,7 @@ function animateFromActionLog(log) {
       const colorStr = latest.slice((name + ' drew face-up ').length).replace('.', '').trim();
       animateCardToPlayerRow(pid, 'face-up-cards', colorStr);
     } else if (latest.startsWith(name + ' drew a blind card')) {
-      animateCardToPlayerRow(pid, 'draw-blind-btn', 'locomotive');
+      animateCardToPlayerRow(pid, 'draw-blind-btn', 'unknown');
     }
   }
 }
@@ -927,8 +942,9 @@ function onDrawFaceUp(slot, sourceEl) {
 document.getElementById('draw-blind-btn').addEventListener('click', () => {
   if (!gameState) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
-  const btn = document.getElementById('draw-blind-btn');
-  animateCardToElement(btn, 'hand-cards', 'locomotive');
+  // Snapshot current hand so we can diff against the server's response to find the drawn color
+  const me = gameState.players?.[MY_PLAYER_ID];
+  pendingBlindDraw = { ...(me?.hand || {}) };
   playSound('draw_card');
   socket.emit('draw_blind', { code: GAME_CODE });
 });

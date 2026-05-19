@@ -3,13 +3,16 @@ eventlet.monkey_patch()
 
 import os
 import re
+import base64
 import random
 import string
+import smtplib
 import uuid
 import secrets
 import json as json_mod
 import urllib.request as urlreq
 import urllib.parse as urlparse
+from email.mime.text import MIMEText
 from functools import wraps
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
@@ -41,6 +44,21 @@ if not DATABASE_URL:
 app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URL
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
+# SMS via Twilio REST (optional — requires TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER)
+TWILIO_ACCOUNT_SID = os.environ.get("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.environ.get("TWILIO_AUTH_TOKEN")
+TWILIO_FROM_NUMBER = os.environ.get("TWILIO_FROM_NUMBER")
+
+# Email via SMTP (optional — requires SMTP_HOST, SMTP_USER, SMTP_PASS)
+SMTP_HOST = os.environ.get("SMTP_HOST")
+SMTP_PORT = int(os.environ.get("SMTP_PORT", 587))
+SMTP_USER = os.environ.get("SMTP_USER")
+SMTP_PASS = os.environ.get("SMTP_PASS")
+SMTP_FROM = os.environ.get("SMTP_FROM", SMTP_USER)
+
+# Public URL used in notification links
+SITE_URL = os.environ.get("SITE_URL", "").rstrip("/")
+
 # Google OAuth (optional — requires GOOGLE_CLIENT_ID + GOOGLE_CLIENT_SECRET env vars)
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = os.environ.get("GOOGLE_CLIENT_SECRET")
@@ -57,6 +75,8 @@ with app.app_context():
         "ALTER TABLE games ADD COLUMN is_private BOOLEAN DEFAULT 0",
         "ALTER TABLE games ADD COLUMN passcode VARCHAR(20)",
         "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
+        "ALTER TABLE users ADD COLUMN phone VARCHAR(20)",
+        "ALTER TABLE users ADD COLUMN notify_new_game BOOLEAN DEFAULT 0",
     ]
     with db.engine.connect() as _conn:
         for _stmt in _migration_stmts:
@@ -120,6 +140,54 @@ def _valid_username(u: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Notification helpers (SMS + email)
+# ---------------------------------------------------------------------------
+
+def _send_sms(to_phone: str, message: str):
+    if not (TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER):
+        return
+    url = f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json"
+    data = urlparse.urlencode({"To": to_phone, "From": TWILIO_FROM_NUMBER, "Body": message}).encode()
+    creds = base64.b64encode(f"{TWILIO_ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}".encode()).decode()
+    req = urlreq.Request(url, data=data, method="POST")
+    req.add_header("Authorization", f"Basic {creds}")
+    req.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urlreq.urlopen(req, timeout=10):
+            pass
+    except Exception:
+        pass
+
+
+def _send_email(to_email: str, subject: str, body: str):
+    if not (SMTP_HOST and SMTP_USER and SMTP_PASS):
+        return
+    msg = MIMEText(body)
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM or SMTP_USER
+    msg["To"] = to_email
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=10) as s:
+            s.starttls()
+            s.login(SMTP_USER, SMTP_PASS)
+            s.send_message(msg)
+    except Exception:
+        pass
+
+
+def _send_game_notifications(game_code: str, host_name: str, site_url: str):
+    join_url = f"{site_url}/lobby/{game_code}"
+    message = f"New TTR Game! Hosted by {host_name}. Join here: {join_url}"
+    with app.app_context():
+        users = User.query.filter_by(notify_new_game=True).all()
+        for user in users:
+            if user.phone:
+                _send_sms(user.phone, message)
+            elif user.email:
+                _send_email(user.email, "New Ticket to Ride Game!", message)
+
+
+# ---------------------------------------------------------------------------
 # Google OAuth helpers
 # ---------------------------------------------------------------------------
 
@@ -166,10 +234,12 @@ def login():
     if not identity or not password:
         return jsonify({"ok": False, "error": "Please fill in all fields."}), 400
 
-    # Allow login by username or email
+    # Allow login by username, email, or phone
     user = User.query.filter_by(username=identity).first()
     if not user:
         user = User.query.filter_by(email=identity.lower()).first()
+    if not user:
+        user = User.query.filter_by(phone=identity).first()
     if not user or not user.check_password(password):
         return jsonify({"ok": False, "error": "Invalid username or password."}), 401
 
@@ -183,6 +253,7 @@ def register():
     username = data.get("username", "").strip()
     email = data.get("email", "").strip().lower()
     password = data.get("password", "")
+    phone = data.get("phone", "").strip() or None
 
     if not username or not email or not password:
         return jsonify({"ok": False, "error": "Please fill in all fields."}), 400
@@ -192,12 +263,16 @@ def register():
         return jsonify({"ok": False, "error": "Password must be at least 8 characters."}), 400
     if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', email):
         return jsonify({"ok": False, "error": "Please enter a valid email address."}), 400
+    if phone and not re.match(r'^\+?[0-9][0-9\s\-\(\)]{6,18}[0-9]$', phone):
+        return jsonify({"ok": False, "error": "Please enter a valid phone number."}), 400
     if User.query.filter_by(username=username).first():
         return jsonify({"ok": False, "error": "Username already taken."}), 409
     if User.query.filter_by(email=email).first():
         return jsonify({"ok": False, "error": "An account with that email already exists."}), 409
+    if phone and User.query.filter_by(phone=phone).first():
+        return jsonify({"ok": False, "error": "An account with that phone number already exists."}), 409
 
-    user = User(username=username, email=email)
+    user = User(username=username, email=email, phone=phone)
     user.set_password(password)
     db.session.add(user)
     db.session.commit()
@@ -224,6 +299,16 @@ def logout():
     session.pop("user_id", None)
     session.pop("guest_name", None)
     return redirect(url_for("login_page"))
+
+
+@app.route("/settings/notify", methods=["POST"])
+def toggle_notify():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    user.notify_new_game = not user.notify_new_game
+    db.session.commit()
+    return jsonify({"ok": True, "notify": user.notify_new_game})
 
 
 # ---------------------------------------------------------------------------
@@ -344,8 +429,10 @@ def lobbies():
                      .filter_by(status="playing", is_private=False)
                      .order_by(Game.created_at.desc())
                      .all())
+    notify = user.notify_new_game if user else False
     return render_template("lobbies.html", user=user, guest_name=guest_name,
-                           games=public_games, ongoing_games=ongoing_games)
+                           games=public_games, ongoing_games=ongoing_games,
+                           notify_new_game=notify)
 
 
 @app.route("/create", methods=["POST"])
@@ -376,6 +463,9 @@ def create_game():
     )
     db.session.add(player)
     db.session.commit()
+
+    site_url = SITE_URL or request.host_url.rstrip("/")
+    eventlet.spawn(_send_game_notifications, code, player_name, site_url)
 
     return jsonify({"ok": True, "code": code})
 
