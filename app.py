@@ -19,6 +19,31 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import subprocess as _subprocess
+
+def _get_git_version():
+    """Return (commit_subject, github_commit_url) or (None, None) if unavailable."""
+    try:
+        root = os.path.dirname(__file__)
+        hash_ = _subprocess.check_output(
+            ["git", "log", "-1", "--format=%h"], cwd=root, text=True,
+            stderr=_subprocess.DEVNULL).strip()
+        subject = _subprocess.check_output(
+            ["git", "log", "-1", "--format=%s"], cwd=root, text=True,
+            stderr=_subprocess.DEVNULL).strip()
+        remote = _subprocess.check_output(
+            ["git", "remote", "get-url", "origin"], cwd=root, text=True,
+            stderr=_subprocess.DEVNULL).strip()
+        if remote.startswith("git@github.com:"):
+            remote = "https://github.com/" + remote[len("git@github.com:"):].removesuffix(".git")
+        else:
+            remote = remote.removesuffix(".git")
+        return subject, f"{remote}/commit/{hash_}"
+    except Exception:
+        return None, None
+
+GIT_VERSION_NAME, GIT_COMMIT_URL = _get_git_version()
+
 from flask import (Flask, render_template, request, jsonify,
                    redirect, url_for, session)
 from flask_socketio import SocketIO, join_room, leave_room, emit
@@ -632,7 +657,8 @@ def game_page(code):
     guest_name = session.get("guest_name") if not user else None
     return render_template("game.html", game=game, player=player,
                            board_data=board_data, music_files=music_files,
-                           is_spectator=is_spectator, user=user, guest_name=guest_name)
+                           is_spectator=is_spectator, user=user, guest_name=guest_name,
+                           git_version_name=GIT_VERSION_NAME, git_commit_url=GIT_COMMIT_URL)
 
 
 # ---------------------------------------------------------------------------

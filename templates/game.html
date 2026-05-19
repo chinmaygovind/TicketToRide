@@ -201,20 +201,15 @@
         </div>
       </label>
     </div>
-    {% if user %}
-    <div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border);">
-      <div style="font-family:'Cinzel',serif;font-size:0.68rem;letter-spacing:0.15em;color:var(--text-muted);margin-bottom:0.5rem;">USERNAME</div>
-      <div style="display:flex;gap:0.4rem;">
-        <input type="text" id="set-username-input" value="{{ user.username }}"
-               style="flex:1;padding:0.4rem 0.6rem;background:var(--bg-dark);border:1px solid var(--border);
-                      border-radius:5px;color:var(--text);font-size:0.85rem;font-family:'Crimson Text',serif;"
-               maxlength="30" autocomplete="off"/>
-        <button id="set-username-btn"
-                style="padding:0.4rem 0.7rem;background:transparent;border:1px solid var(--gold);
-                       border-radius:5px;color:var(--gold);font-family:'Cinzel',serif;font-size:0.7rem;
-                       letter-spacing:0.05em;cursor:pointer;white-space:nowrap;transition:background 0.15s;">Save</button>
-      </div>
-      <div id="set-username-hint" style="font-size:0.72rem;margin-top:0.3rem;min-height:1em;color:var(--text-muted);"></div>
+    {% if git_version_name %}
+    <div style="margin-top:1rem;padding-top:0.6rem;border-top:1px solid var(--border);text-align:center;">
+      <span style="font-size:0.65rem;color:var(--text-muted);font-family:'Cinzel',serif;letter-spacing:0.08em;">
+        Playing version
+        <a href="{{ git_commit_url }}" target="_blank" rel="noopener"
+           style="color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(200,168,75,0.35);transition:border-color 0.15s;"
+           onmouseover="this.style.borderBottomColor='var(--gold)'"
+           onmouseout="this.style.borderBottomColor='rgba(200,168,75,0.35)'">{{ git_version_name }}</a>
+      </span>
     </div>
     {% endif %}
   </div>

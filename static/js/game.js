@@ -1329,44 +1329,6 @@ if (_loadSetting('ttr_music', false)) {
 // Kick off background music
 _initMusic();
 
-// ─── Username change (settings modal) ─────────────────────────────────────────
-
-(function initUsernameChange() {
-  const btn = document.getElementById('set-username-btn');
-  if (!btn) return;
-  btn.addEventListener('click', async () => {
-    const input = document.getElementById('set-username-input');
-    const hint  = document.getElementById('set-username-hint');
-    const newName = input.value.trim();
-    if (!newName) return;
-    hint.textContent = 'Saving…';
-    hint.style.color = 'var(--text-muted)';
-    try {
-      const res = await fetch('/account/update', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ field: 'username', value: newName }),
-      });
-      const json = await res.json();
-      if (json.ok) {
-        hint.textContent = 'Saved!';
-        hint.style.color = '#22c55e';
-        setTimeout(() => { hint.textContent = ''; }, 2500);
-      } else {
-        hint.textContent = json.error || 'Failed.';
-        hint.style.color = '#ef4444';
-      }
-    } catch (_) {
-      hint.textContent = 'Network error.';
-      hint.style.color = '#ef4444';
-    }
-  });
-  // Allow Enter key inside the input
-  document.getElementById('set-username-input').addEventListener('keydown', e => {
-    if (e.key === 'Enter') btn.click();
-  });
-})();
-
 // ─── Chat ──────────────────────────────────────────────────────────────────────
 
 (function initChat() {
