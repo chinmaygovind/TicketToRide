@@ -1060,7 +1060,6 @@ html, body {
 
 /* ─── Scoring reference section (inside right sidebar) ──────────────── */
 .scoring-section {
-  margin-top: auto; /* push scoring + audio to the very bottom */
   border-top: 1px solid var(--border);
   border-bottom: none;
 }
@@ -1103,44 +1102,60 @@ html, body {
   color: #a09078;
 }
 
-/* ─── Audio controls — inline in sidebar ────────────────────────────── */
-.audio-controls {
-  display: flex;
-  flex-direction: row;
-  gap: 8px;
-  justify-content: center;
-  padding: 4px 0 2px;
+/* ─── Settings footer ───────────────────────────────────────────────── */
+.settings-footer {
+  margin-top: auto;
+  border-top: 1px solid var(--border);
+  border-bottom: none;
+  padding: 0.5rem 0.9rem;
 }
-.audio-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  background: rgba(26,24,20,0.92);
+.settings-btn {
+  width: 100%;
+  padding: 0.45rem 0.7rem;
+  background: var(--bg-card);
   border: 1px solid var(--border);
-  color: var(--gold);
-  font-size: 1rem;
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
   cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+  text-align: center;
+}
+.settings-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ─── Settings modal list ───────────────────────────────────────────── */
+.settings-list { display: flex; flex-direction: column; gap: 0; }
+.settings-row {
   display: flex;
   align-items: center;
-  justify-content: center;
-  transition: border-color 0.15s, opacity 0.15s, transform 0.1s;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
-  padding: 0;
-  line-height: 1;
+  gap: 0.85rem;
+  padding: 0.7rem 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  user-select: none;
 }
-.audio-btn:hover {
-  border-color: var(--gold);
-  transform: scale(1.1);
+.settings-row:last-child { border-bottom: none; }
+.settings-row input[type=checkbox] {
+  width: 17px; height: 17px;
+  flex-shrink: 0;
+  accent-color: var(--gold);
+  cursor: pointer;
 }
-.audio-btn.audio-off {
-  opacity: 0.35;
-  border-color: #555;
+.settings-row-label { font-size: 0.92rem; color: var(--text); }
+.settings-row-desc  { font-size: 0.75rem; color: var(--text-muted); margin-top: 0.1rem; }
+
+/* ─── Draw tickets button inside tickets section ────────────────────── */
+.tickets-draw-btn {
+  flex-shrink: 0;
+  margin-top: 0.4rem;
+  width: 100%;
 }
 
 /* ─── Spectator mode ─────────────────────────────────────────────────── */
 body.spectating #hand-section,
-body.spectating #tickets-section,
-body.spectating #actions-section { display: none; }
+body.spectating #tickets-section { display: none; }
 
 body.spectating #draw-blind-btn { display: none; }
 

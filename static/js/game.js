@@ -16,7 +16,14 @@ let prevClaimedCount = 0;
 let pendingBlindDraw = null; // hand snapshot taken before a blind draw, cleared after animation
 
 // ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
-let soundEnabled = true;
+// Settings — persisted to localStorage
+function _loadSetting(key, def) {
+  const v = localStorage.getItem(key);
+  return v === null ? def : v === 'true';
+}
+let soundEnabled        = _loadSetting('ttr_sounds', true);
+let yourTurnSoundEnabled = _loadSetting('ttr_your_turn_sound', true);
+let scoringVisible      = _loadSetting('ttr_scoring', true);
 let _gameOverSoundPlayed = false;
 
 let _audioCtx = null;
@@ -102,9 +109,6 @@ function _initMusic() {
     _musicIdx = (_musicIdx + 1) % _musicQueue.length;
     _loadAndPlayTrack();
   });
-  // Reflect off state on button immediately
-  const btn = document.getElementById('music-toggle');
-  if (btn) btn.classList.add('audio-off');
 }
 
 function _loadAndPlayTrack() {
@@ -117,23 +121,6 @@ function _loadAndPlayTrack() {
 document.addEventListener('click', function _firstGestureHandler() {
   _unlockAudio();
 }, { once: true });
-
-function toggleMusic() {
-  musicEnabled = !musicEnabled;
-  const btn = document.getElementById('music-toggle');
-  if (btn) btn.classList.toggle('audio-off', !musicEnabled);
-  if (musicEnabled) {
-    _loadAndPlayTrack();
-  } else {
-    _musicAudio.pause();
-  }
-}
-
-function toggleSound() {
-  soundEnabled = !soundEnabled;
-  const btn = document.getElementById('sound-toggle');
-  if (btn) btn.classList.toggle('audio-off', !soundEnabled);
-}
 
 // ─── Toast notifications ──────────────────────────────────────────────────────
 function showToast(msg, color = '#f59e0b', duration = 4000) {
@@ -274,7 +261,7 @@ socket.on('game_state', (state) => {
       gameState.current_player_id !== MY_PLAYER_ID &&
       state.current_player_id === MY_PLAYER_ID &&
       (state.phase === 'main' || state.phase === 'final_round')) {
-    playSound('your_turn');
+    if (yourTurnSoundEnabled) playSound('your_turn');
     showToast('🎯 Your turn!', '#22c55e', 3000);
   }
   // Play train placement sound only on a successful claim (routes count increased while it was my turn)
@@ -1225,9 +1212,56 @@ socket.on('all_tickets', (tickets) => {
   }
 })();
 
-// Wire audio toggle buttons
-document.getElementById('music-toggle').addEventListener('click', toggleMusic);
-document.getElementById('sound-toggle').addEventListener('click', toggleSound);
+// ─── Settings modal ───────────────────────────────────────────────────────────
+
+function _applySettings() {
+  document.getElementById('scoring-section').style.display = scoringVisible ? '' : 'none';
+}
+
+function openSettings() {
+  const modal = document.getElementById('settings-modal');
+  // Sync checkboxes to current state
+  document.getElementById('set-your-turn-sound').checked = yourTurnSoundEnabled;
+  document.getElementById('set-sounds').checked          = soundEnabled;
+  document.getElementById('set-music').checked           = musicEnabled;
+  document.getElementById('set-scoring').checked         = scoringVisible;
+  modal.classList.remove('hidden');
+}
+
+function closeSettings() {
+  document.getElementById('settings-modal').classList.add('hidden');
+}
+
+document.getElementById('settings-btn').addEventListener('click', openSettings);
+document.getElementById('settings-backdrop').addEventListener('click', closeSettings);
+
+document.getElementById('set-your-turn-sound').addEventListener('change', e => {
+  yourTurnSoundEnabled = e.target.checked;
+  localStorage.setItem('ttr_your_turn_sound', yourTurnSoundEnabled);
+});
+
+document.getElementById('set-sounds').addEventListener('change', e => {
+  soundEnabled = e.target.checked;
+  localStorage.setItem('ttr_sounds', soundEnabled);
+});
+
+document.getElementById('set-music').addEventListener('change', e => {
+  musicEnabled = e.target.checked;
+  localStorage.setItem('ttr_music', musicEnabled);
+  if (musicEnabled) { _loadAndPlayTrack(); } else { _musicAudio.pause(); }
+});
+
+document.getElementById('set-scoring').addEventListener('change', e => {
+  scoringVisible = e.target.checked;
+  localStorage.setItem('ttr_scoring', scoringVisible);
+  _applySettings();
+});
+
+// Apply persisted settings on load
+_applySettings();
+if (_loadSetting('ttr_music', false)) {
+  musicEnabled = true;
+}
 
 // Kick off background music
 _initMusic();

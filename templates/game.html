@@ -45,21 +45,16 @@
     <div class="sidebar-section" id="tickets-section">
       <div class="sidebar-label">YOUR TICKETS</div>
       <div id="tickets-panel" class="tickets-area"></div>
-    </div>
-    <div class="sidebar-section" id="actions-section">
-      <div class="sidebar-label">ACTIONS</div>
-      <div id="action-area">
-        <button class="action-btn" id="draw-tickets-btn">
-          📋 Draw Destination Tickets
-          <span id="dest-count" class="deck-count">30</span>
-        </button>
-      </div>
+      <button class="action-btn tickets-draw-btn" id="draw-tickets-btn">
+        📋 Draw Destination Tickets
+        <span id="dest-count" class="deck-count">30</span>
+      </button>
     </div>
     <div class="sidebar-section action-log-section">
       <div class="sidebar-label" id="action-log-label">ACTION LOG</div>
       <div id="action-log" class="action-log"></div>
     </div>
-    <div class="sidebar-section scoring-section">
+    <div class="sidebar-section scoring-section" id="scoring-section">
       <div class="sidebar-label">SCORING REFERENCE</div>
       <div class="scoring-grid">
         <div class="scoring-grid-row"><span class="sc-label">1 car</span><span class="sc-pts">1 pt</span></div>
@@ -81,11 +76,8 @@
         </div>
       </div>
     </div>
-    <div class="sidebar-section" style="border-bottom:none; border-top:1px solid var(--border);">
-      <div class="audio-controls">
-        <button id="music-toggle" class="audio-btn" title="Toggle Music">🎵</button>
-        <button id="sound-toggle" class="audio-btn" title="Toggle Sounds">🔊</button>
-      </div>
+    <div class="sidebar-section settings-footer">
+      <button id="settings-btn" class="settings-btn">⚙ Settings</button>
     </div>
   </aside>
 
@@ -153,6 +145,43 @@
     <div class="modal-footer">
       <button class="btn-secondary" id="claim-cancel-btn">Cancel</button>
       <button class="btn-primary" id="claim-confirm-btn">Claim</button>
+    </div>
+  </div>
+</div>
+
+<div id="settings-modal" class="modal hidden">
+  <div class="modal-backdrop" id="settings-backdrop"></div>
+  <div class="modal-box" style="max-width:310px;">
+    <h2>⚙ Settings</h2>
+    <div class="settings-list">
+      <label class="settings-row">
+        <input type="checkbox" id="set-your-turn-sound"/>
+        <div>
+          <div class="settings-row-label">Your turn notification</div>
+          <div class="settings-row-desc">Ping sound when it's your turn</div>
+        </div>
+      </label>
+      <label class="settings-row">
+        <input type="checkbox" id="set-sounds"/>
+        <div>
+          <div class="settings-row-label">All sounds</div>
+          <div class="settings-row-desc">Card draws, trains placed, etc.</div>
+        </div>
+      </label>
+      <label class="settings-row">
+        <input type="checkbox" id="set-music"/>
+        <div>
+          <div class="settings-row-label">Background music</div>
+          <div class="settings-row-desc">Currently unavailable</div>
+        </div>
+      </label>
+      <label class="settings-row">
+        <input type="checkbox" id="set-scoring"/>
+        <div>
+          <div class="settings-row-label">Show scoring reference</div>
+          <div class="settings-row-desc">Route length point table</div>
+        </div>
+      </label>
     </div>
   </div>
 </div>
