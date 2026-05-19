@@ -790,25 +790,45 @@ def on_get_all_tickets():
 # ---------------------------------------------------------------------------
 
 def _stale_game_cleanup():
-    INACTIVITY_LIMIT = timedelta(minutes=20)
+    PLAYING_LIMIT = timedelta(minutes=20)
+    WAITING_LIMIT = timedelta(hours=2)
 
     def _run_cleanup():
         with app.app_context():
-            cutoff = datetime.utcnow() - INACTIVITY_LIMIT
-            stale = Game.query.filter(
+            now = datetime.utcnow()
+
+            # End playing games inactive for >20 minutes
+            playing_cutoff = now - PLAYING_LIMIT
+            stale_playing = Game.query.filter(
                 Game.status == "playing",
                 db.or_(
-                    Game.last_activity_at == None,   # noqa: E711 — SQL None check
-                    Game.last_activity_at < cutoff,
+                    Game.last_activity_at == None,   # noqa: E711
+                    Game.last_activity_at < playing_cutoff,
                 ),
             ).all()
-            for game in stale:
+            for game in stale_playing:
                 game.status = "ended"
                 db.session.commit()
                 socketio.emit("game_over", {
                     "reason": "Game ended due to inactivity.",
                     "scores": {},
                 }, to=game.code)
+
+            # Delete waiting lobbies older than 2 hours
+            waiting_cutoff = now - WAITING_LIMIT
+            stale_waiting = Game.query.filter(
+                Game.status == "waiting",
+                Game.created_at < waiting_cutoff,
+            ).all()
+            for game in stale_waiting:
+                socketio.emit("lobby_closed", {
+                    "reason": "Lobby expired.",
+                }, to=game.code)
+                for player in game.players:
+                    db.session.delete(player)
+                db.session.delete(game)
+            if stale_waiting:
+                db.session.commit()
 
     _run_cleanup()  # immediate pass on startup
     while True:

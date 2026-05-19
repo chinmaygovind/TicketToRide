@@ -130,6 +130,10 @@ socket.on('game_started', (data) => {
   window.location.href = '/game/' + data.code;
 });
 
+socket.on('lobby_closed', () => {
+  window.location.href = '/lobbies';
+});
+
 socket.on('error', (data) => {
   alert(data.message);
 });
