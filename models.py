@@ -18,6 +18,30 @@ class User(db.Model):
     notify_new_game = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # Stats
+    elo = db.Column(db.Integer, default=1000)
+    games_played = db.Column(db.Integer, default=0)
+    games_won = db.Column(db.Integer, default=0)
+    trains_placed = db.Column(db.Integer, default=0)
+    tickets_drawn = db.Column(db.Integer, default=0)
+    total_points = db.Column(db.Integer, default=0)
+
+    @property
+    def elo_tier(self):
+        e = self.elo or 1000
+        if e >= 1400: return "Rail Baron"
+        if e >= 1250: return "Station Master"
+        if e >= 1100: return "Engineer"
+        if e >= 1000: return "Conductor"
+        if e >= 800:  return "Brakeman"
+        return "Passenger"
+
+    @property
+    def win_rate(self):
+        if not self.games_played:
+            return 0
+        return round(100 * self.games_won / self.games_played)
+
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
 
@@ -69,6 +93,7 @@ class Player(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     game_id = db.Column(db.Integer, db.ForeignKey("games.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     session_key = db.Column(db.String(64), nullable=False, index=True)
     name = db.Column(db.String(50), nullable=False)
     color = db.Column(db.String(20), nullable=False)

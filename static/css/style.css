@@ -1847,4 +1847,225 @@ body.spectating #draw-blind-btn { display: none; }
   .modal-box { padding: 1.2rem; }
   .modal-box.wide { max-width: 96% !important; }
   .card-selector { grid-template-columns: repeat(2, 1fr) !important; }
+
+  /* Account page: stack panels */
+  .account-body { flex-direction: column; padding: 1rem; }
 }
+
+/* ─── Account page ──────────────────────────────────────────── */
+.account-body {
+  display: flex;
+  gap: 1.5rem;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  align-items: flex-start;
+}
+
+/* ── Stats panel (left) ── */
+.account-stats-panel {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.elo-hero {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  text-align: center;
+}
+.elo-tier {
+  font-family: 'Cinzel', serif;
+  font-size: 0.7rem;
+  letter-spacing: 0.25em;
+  color: var(--gold);
+  margin-bottom: 0.4rem;
+}
+.elo-number {
+  font-family: 'Cinzel', serif;
+  font-size: 3.2rem;
+  font-weight: 900;
+  color: var(--gold-light);
+  line-height: 1;
+  text-shadow: 0 0 30px rgba(200,168,75,0.35);
+}
+.elo-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  color: var(--text-muted);
+  margin-top: 0.3rem;
+}
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.stat-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.8rem 0.6rem;
+  text-align: center;
+}
+.stat-value {
+  font-family: 'Cinzel', serif;
+  font-size: 1.6rem;
+  font-weight: 700;
+  color: var(--gold-light);
+  line-height: 1;
+}
+.stat-label {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  letter-spacing: 0.03em;
+}
+
+.tier-ladder {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.9rem 1rem;
+}
+.tier-ladder-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.62rem;
+  letter-spacing: 0.2em;
+  color: var(--gold);
+  margin-bottom: 0.6rem;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.tier-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.3rem 0.2rem;
+  border-radius: 4px;
+  font-size: 0.82rem;
+}
+.tier-row.tier-current {
+  background: rgba(200,168,75,0.1);
+  border: 1px solid rgba(200,168,75,0.3);
+  padding: 0.3rem 0.5rem;
+}
+.tier-name { font-weight: 600; }
+.tier-threshold { color: var(--text-muted); font-size: 0.72rem; font-family: 'Cinzel', serif; }
+
+/* ── Settings panel (right) ── */
+.account-settings-panel {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.account-section-title {
+  font-family: 'Cinzel', serif;
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  color: var(--gold);
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid var(--border);
+}
+.account-field-group { display: flex; flex-direction: column; gap: 0.3rem; }
+.account-field-label {
+  font-family: 'Cinzel', serif;
+  font-size: 0.65rem;
+  letter-spacing: 0.15em;
+  color: var(--text-muted);
+}
+.account-field-optional {
+  font-family: 'Crimson Text', serif;
+  font-size: 0.8em;
+  letter-spacing: 0;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.account-field-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.account-input {
+  flex: 1;
+  padding: 0.55rem 0.85rem;
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 0.95rem;
+  font-family: 'Crimson Text', serif;
+  transition: border-color 0.2s;
+  min-width: 0;
+}
+.account-input:focus { outline: none; border-color: var(--gold); }
+.account-save-btn {
+  padding: 0.5rem 1rem;
+  background: transparent;
+  border: 1px solid var(--gold);
+  border-radius: 6px;
+  color: var(--gold);
+  font-family: 'Cinzel', serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.account-save-btn:hover { background: rgba(200,168,75,0.15); }
+.account-field-hint {
+  font-size: 0.8rem;
+  min-height: 1.1em;
+  transition: color 0.2s;
+}
+.hint-ok  { color: #22c55e; }
+.hint-err { color: #ef4444; }
+
+.account-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 0.25rem 0;
+}
+
+.account-notify-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.notify-toggle {
+  padding: 0.45rem 1rem;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: 'Cinzel', serif;
+  font-size: 0.75rem;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s;
+  flex-shrink: 0;
+}
+.notify-toggle:hover { border-color: var(--gold); color: var(--gold); }
+.notify-toggle.notify-on { border-color: var(--gold); color: var(--gold); background: rgba(200,168,75,0.12); }
+
+.account-danger-link {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.account-danger-link:hover { color: var(--red); }

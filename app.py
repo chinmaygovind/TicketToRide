@@ -77,6 +77,13 @@ with app.app_context():
         "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
         "ALTER TABLE users ADD COLUMN phone VARCHAR(20)",
         "ALTER TABLE users ADD COLUMN notify_new_game BOOLEAN DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN elo INTEGER DEFAULT 1000",
+        "ALTER TABLE users ADD COLUMN games_played INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN games_won INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN trains_placed INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN tickets_drawn INTEGER DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN total_points INTEGER DEFAULT 0",
+        "ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)",
     ]
     with db.engine.connect() as _conn:
         for _stmt in _migration_stmts:
@@ -311,6 +318,68 @@ def toggle_notify():
     return jsonify({"ok": True, "notify": user.notify_new_game})
 
 
+@app.route("/account")
+@require_login
+def account_page():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login_page"))
+    return render_template("account.html", user=user)
+
+
+@app.route("/account/update", methods=["POST"])
+@require_login
+def account_update():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    data = request.json or {}
+    field = data.get("field", "")
+
+    if field == "username":
+        new_val = data.get("value", "").strip()
+        if not _valid_username(new_val):
+            return jsonify({"ok": False, "error": "Username must be 2-30 characters, start with a letter, letters/numbers/hyphens/underscores only."}), 400
+        existing = User.query.filter_by(username=new_val).first()
+        if existing and existing.id != user.id:
+            return jsonify({"ok": False, "error": "Username already taken."}), 409
+        user.username = new_val
+
+    elif field == "email":
+        new_val = data.get("value", "").strip().lower()
+        if not re.match(r'^[^@\s]+@[^@\s]+\.[^@\s]+$', new_val):
+            return jsonify({"ok": False, "error": "Please enter a valid email address."}), 400
+        existing = User.query.filter_by(email=new_val).first()
+        if existing and existing.id != user.id:
+            return jsonify({"ok": False, "error": "Email already in use."}), 409
+        user.email = new_val
+
+    elif field == "phone":
+        new_val = data.get("value", "").strip() or None
+        if new_val and not re.match(r'^\+?[0-9][0-9\s\-\(\)]{6,18}[0-9]$', new_val):
+            return jsonify({"ok": False, "error": "Please enter a valid phone number."}), 400
+        if new_val:
+            existing = User.query.filter_by(phone=new_val).first()
+            if existing and existing.id != user.id:
+                return jsonify({"ok": False, "error": "Phone number already in use."}), 409
+        user.phone = new_val
+
+    elif field == "password":
+        current_pw = data.get("current_password", "")
+        new_pw = data.get("value", "")
+        if user.password_hash and not user.check_password(current_pw):
+            return jsonify({"ok": False, "error": "Current password is incorrect."}), 401
+        if len(new_pw) < 8:
+            return jsonify({"ok": False, "error": "New password must be at least 8 characters."}), 400
+        user.set_password(new_pw)
+
+    else:
+        return jsonify({"ok": False, "error": "Unknown field."}), 400
+
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 # ---------------------------------------------------------------------------
 # HTTP Routes — Google OAuth
 # ---------------------------------------------------------------------------
@@ -452,9 +521,11 @@ def create_game():
     db.session.add(game)
     db.session.flush()
 
+    user = get_current_user()
     color = PLAYER_COLORS[0]
     player = Player(
         game_id=game.id,
+        user_id=user.id if user else None,
         session_key=sk,
         name=player_name,
         color=color,
@@ -503,8 +574,10 @@ def join_game_http():
     if not available:
         return jsonify({"ok": False, "error": "No colors available."}), 400
 
+    join_user = get_current_user()
     player = Player(
         game_id=game.id,
+        user_id=join_user.id if join_user else None,
         session_key=sk,
         name=player_name,
         color=available[0],
@@ -800,10 +873,80 @@ def _player_action(code: str, action_fn):
     _run_bots(game, code)
 
 
+def _finalize_game_stats(game: Game, state: dict):
+    """Called once when game phase transitions to ended. Updates per-user stats and ELO."""
+    game.status = "ended"
+
+    scores = state.get("scores", {})
+    winner_id = state.get("winner_id")
+    if not scores:
+        db.session.commit()
+        return
+
+    # Map player-state pid -> Player record
+    pid_to_player = {str(p.id): p for p in game.players}
+
+    # Gather real (non-bot) players who have a linked user account
+    pid_to_user: dict[str, User] = {}
+    for pid, p in pid_to_player.items():
+        if p.user_id and not p.session_key.startswith("bot_"):
+            u = db.session.get(User, p.user_id)
+            if u:
+                pid_to_user[pid] = u
+
+    if not pid_to_user:
+        db.session.commit()
+        return
+
+    # Build ranking (0 = best) from scores for ELO
+    ranked_pids = sorted(scores.keys(), key=lambda pid: scores[pid]["total"], reverse=True)
+    rank_of = {pid: i for i, pid in enumerate(ranked_pids)}
+
+    # Compute ELO deltas (pairwise, then averaged)
+    elo_deltas: dict[str, int] = {}
+    real_pids = [pid for pid in ranked_pids if pid in pid_to_user]
+    for pid in real_pids:
+        user = pid_to_user[pid]
+        K = 32 if (user.games_played or 0) < 10 else 16
+        my_elo = user.elo or 1000
+        my_rank = rank_of[pid]
+        delta = 0.0
+        opponents = [opid for opid in real_pids if opid != pid]
+        for opid in opponents:
+            opp_elo = pid_to_user[opid].elo or 1000
+            expected = 1 / (1 + 10 ** ((opp_elo - my_elo) / 400))
+            opp_rank = rank_of[opid]
+            actual = 1.0 if my_rank < opp_rank else (0.5 if my_rank == opp_rank else 0.0)
+            delta += K * (actual - expected)
+        if opponents:
+            delta /= len(opponents)
+        elo_deltas[pid] = round(delta)
+
+    # Apply stats updates
+    for pid, user in pid_to_user.items():
+        if pid not in scores:
+            continue
+        ps = state["player_states"].get(pid, {})
+        sc = scores[pid]
+        user.games_played = (user.games_played or 0) + 1
+        if pid == winner_id:
+            user.games_won = (user.games_won or 0) + 1
+        user.trains_placed = (user.trains_placed or 0) + max(0, 45 - ps.get("trains", 45))
+        user.tickets_drawn = (user.tickets_drawn or 0) + len(ps.get("tickets", []))
+        user.total_points  = (user.total_points or 0) + max(0, sc.get("total", 0))
+        user.elo = max(100, (user.elo or 1000) + elo_deltas.get(pid, 0))
+
+    db.session.commit()
+
+
 def _broadcast_state(game: Game, code: str):
     game.last_activity_at = datetime.utcnow()
     db.session.commit()
     state = game.state
+
+    # Finalize stats exactly once when the game first ends
+    if state.get("phase") == "ended" and game.status == "playing":
+        _finalize_game_stats(game, state)
     bot_ids = [str(p.id) for p in game.players if p.session_key.startswith("bot_")]
     host_id = next((str(p.id) for p in game.players if p.is_host), None)
     for p in game.players:

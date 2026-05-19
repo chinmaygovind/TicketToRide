@@ -15,6 +15,7 @@
                 title="{% if notify_new_game %}Notifications on — click to turn off{% else %}Get notified when a new game starts{% endif %}">
           {% if notify_new_game %}🔔{% else %}🔕{% endif %} Notify Me
         </button>
+        <a href="/account" class="btn-logout">ACCOUNT</a>
         <a href="/logout" class="btn-logout">LOGOUT</a>
       {% else %}
         <span class="lobbies-username">Playing as <strong>{{ guest_name }}</strong> <span class="guest-badge">GUEST</span></span>

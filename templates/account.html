@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Account — {{ user.username }}{% endblock %}
+
+{% block body %}
+<div class="lobbies-bg">
+
+  <!-- Header (same as lobbies) -->
+  <div class="lobbies-header">
+    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
+    <div class="lobbies-user">
+      <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+      <a href="/lobbies" class="btn-logout">← LOBBIES</a>
+      <a href="/logout" class="btn-logout">LOGOUT</a>
+    </div>
+  </div>
+
+  <div class="account-body">
+
+    <!-- ─── Stats panel ───────────────────────────────────── -->
+    <div class="account-stats-panel">
+
+      <!-- ELO hero -->
+      <div class="elo-hero">
+        <div class="elo-tier">{{ user.elo_tier }}</div>
+        <div class="elo-number">{{ user.elo or 1000 }}</div>
+        <div class="elo-label">ELO RATING</div>
+      </div>
+
+      <!-- Stat grid -->
+      <div class="stat-grid">
+        <div class="stat-card">
+          <div class="stat-value">{{ user.games_played or 0 }}</div>
+          <div class="stat-label">Games Played</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ user.games_won or 0 }}</div>
+          <div class="stat-label">Games Won</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ user.win_rate }}%</div>
+          <div class="stat-label">Win Rate</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ user.trains_placed or 0 }}</div>
+          <div class="stat-label">Trains Placed</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ user.tickets_drawn or 0 }}</div>
+          <div class="stat-label">Tickets Drawn</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-value">{{ user.total_points or 0 }}</div>
+          <div class="stat-label">Total Points</div>
+        </div>
+      </div>
+
+      <!-- ELO tier ladder -->
+      <div class="tier-ladder">
+        <div class="tier-ladder-title">TIER LADDER</div>
+        {% set tiers = [
+          ("Rail Baron",    1400, "#e8c97a"),
+          ("Station Master",1250, "#c8a84b"),
+          ("Engineer",      1100, "#94a3b8"),
+          ("Conductor",     1000, "#78716c"),
+          ("Brakeman",       800, "#6b7280"),
+          ("Passenger",        0, "#4b5563"),
+        ] %}
+        {% for name, threshold, color in tiers %}
+        <div class="tier-row {% if user.elo_tier == name %}tier-current{% endif %}">
+          <span class="tier-name" style="color:{{ color }}">{{ name }}</span>
+          <span class="tier-threshold">{{ threshold }}+</span>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- ─── Settings panel ───────────────────────────────── -->
+    <div class="account-settings-panel">
+
+      <div class="account-section-title">PROFILE SETTINGS</div>
+
+      <!-- Username -->
+      <div class="account-field-group">
+        <div class="account-field-label">USERNAME</div>
+        <div class="account-field-row">
+          <input type="text" class="account-input" id="field-username"
+                 value="{{ user.username }}" maxlength="30" autocomplete="off"/>
+          <button class="account-save-btn" data-field="username">Save</button>
+        </div>
+        <div class="account-field-hint" id="hint-username"></div>
+      </div>
+
+      <!-- Email -->
+      <div class="account-field-group">
+        <div class="account-field-label">EMAIL</div>
+        <div class="account-field-row">
+          <input type="email" class="account-input" id="field-email"
+                 value="{{ user.email }}" autocomplete="email"/>
+          <button class="account-save-btn" data-field="email">Save</button>
+        </div>
+        <div class="account-field-hint" id="hint-email"></div>
+      </div>
+
+      <!-- Phone -->
+      <div class="account-field-group">
+        <div class="account-field-label">
+          PHONE NUMBER
+          <span class="account-field-optional">(optional — for game alerts)</span>
+        </div>
+        <div class="account-field-row">
+          <input type="tel" class="account-input" id="field-phone"
+                 value="{{ user.phone or '' }}" placeholder="+1 555 123 4567"
+                 autocomplete="tel"/>
+          <button class="account-save-btn" data-field="phone">Save</button>
+        </div>
+        <div class="account-field-hint" id="hint-phone"></div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <!-- Password -->
+      <div class="account-section-title" style="margin-top:0;">CHANGE PASSWORD</div>
+
+      <div class="account-field-group">
+        <div class="account-field-label">CURRENT PASSWORD</div>
+        <input type="password" class="account-input" id="field-current-password"
+               placeholder="leave blank if set via Google"
+               autocomplete="current-password" style="width:100%;"/>
+      </div>
+      <div class="account-field-group">
+        <div class="account-field-label">NEW PASSWORD</div>
+        <div class="account-field-row">
+          <input type="password" class="account-input" id="field-password"
+                 placeholder="at least 8 characters"
+                 autocomplete="new-password"/>
+          <button class="account-save-btn" data-field="password">Save</button>
+        </div>
+        <div class="account-field-hint" id="hint-password"></div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <!-- Notification preference -->
+      <div class="account-section-title" style="margin-top:0;">NOTIFICATIONS</div>
+      <div class="account-notify-row">
+        <div>
+          <div style="font-size:0.9rem;color:var(--text);">Game start alerts</div>
+          <div style="font-size:0.78rem;color:var(--text-muted);margin-top:0.2rem;">
+            Get a text or email when someone creates a new game lobby.
+          </div>
+        </div>
+        <button class="notify-toggle {% if user.notify_new_game %}notify-on{% endif %}"
+                id="notify-toggle-btn">
+          {{ "🔔 ON" if user.notify_new_game else "🔕 OFF" }}
+        </button>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div style="text-align:center;">
+        <a href="/logout" class="account-danger-link">Sign out of this account</a>
+      </div>
+
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function saveField(field, value, extra) {
+  const hintEl = document.getElementById('hint-' + field);
+  const payload = { field, value, ...extra };
+  hintEl.textContent = '';
+  hintEl.className = 'account-field-hint';
+
+  const res = await fetch('/account/update', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json();
+  if (data.ok) {
+    hintEl.textContent = '✓ Saved';
+    hintEl.classList.add('hint-ok');
+    if (field === 'username') {
+      document.title = 'Account — ' + value;
+    }
+  } else {
+    hintEl.textContent = data.error || 'Failed to save.';
+    hintEl.classList.add('hint-err');
+  }
+}
+
+document.querySelectorAll('.account-save-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const field = btn.dataset.field;
+    if (field === 'password') {
+      const val = document.getElementById('field-password').value;
+      const cur = document.getElementById('field-current-password').value;
+      if (!val) return;
+      saveField('password', val, { current_password: cur });
+    } else {
+      const val = document.getElementById('field-' + field).value.trim();
+      saveField(field, val, {});
+    }
+  });
+});
+
+// Enter-key shortcut on text inputs
+['username', 'email', 'phone'].forEach(f => {
+  const el = document.getElementById('field-' + f);
+  if (el) el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') document.querySelector(`[data-field="${f}"]`).click();
+  });
+});
+document.getElementById('field-password').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.querySelector('[data-field="password"]').click();
+});
+
+// Notify toggle
+document.getElementById('notify-toggle-btn').addEventListener('click', async () => {
+  const btn = document.getElementById('notify-toggle-btn');
+  btn.disabled = true;
+  const res = await fetch('/settings/notify', { method: 'POST' });
+  const data = await res.json();
+  if (data.ok) {
+    btn.classList.toggle('notify-on', data.notify);
+    btn.textContent = data.notify ? '🔔 ON' : '🔕 OFF';
+  }
+  btn.disabled = false;
+});
+</script>
+{% endblock %}
