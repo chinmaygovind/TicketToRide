@@ -195,7 +195,7 @@ ROUTES = [
 DESTINATION_TICKETS = [
     {"id":  1, "city1": "Denver",         "city2": "El Paso",         "points":  4},
     {"id":  2, "city1": "Kansas City",    "city2": "Houston",         "points":  5},
-    {"id":  3, "city1": "New York",       "city2": "Atlanta",         "points": 11},
+    {"id":  3, "city1": "New York",       "city2": "Atlanta",         "points":  6},
     {"id":  4, "city1": "Chicago",        "city2": "New Orleans",     "points":  7},
     {"id":  5, "city1": "Calgary",        "city2": "Salt Lake City",  "points":  7},
     {"id":  6, "city1": "Helena",         "city2": "Los Angeles",     "points":  8},
