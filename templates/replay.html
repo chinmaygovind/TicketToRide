@@ -1,0 +1,385 @@
+{% extends "base.html" %}
+{% block title %}Replay — {{ game.code }}{% endblock %}
+
+{% block head %}
+<style>
+  body { overflow: hidden; }
+  .replay-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background: var(--bg-dark);
+  }
+  .replay-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.6rem 1.2rem;
+    background: var(--bg-panel);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  .replay-title {
+    font-family: 'Cinzel', serif;
+    font-size: 0.85rem;
+    color: var(--gold);
+    letter-spacing: 0.12em;
+  }
+  .replay-body {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+  .replay-board-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+  }
+  .replay-board-container {
+    flex: 1;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0f0e0c;
+  }
+  .replay-controls {
+    background: rgba(0,0,0,0.8);
+    border-top: 1px solid var(--border);
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    flex-shrink: 0;
+  }
+  .replay-controls input[type=range] {
+    flex: 1;
+    accent-color: var(--gold);
+  }
+  .replay-btn {
+    padding: 0.35rem 0.9rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--gold);
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .replay-btn:hover { border-color: var(--gold); background: rgba(200,168,75,0.12); }
+  .replay-btn.active { background: rgba(200,168,75,0.2); border-color: var(--gold); }
+  .replay-step-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    min-width: 80px;
+    text-align: center;
+  }
+  .replay-sidebar {
+    width: 240px;
+    background: var(--bg-panel);
+    border-left: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 0.8rem;
+    flex-shrink: 0;
+  }
+  .replay-sidebar-label {
+    font-family: 'Cinzel', serif;
+    font-size: 0.62rem;
+    letter-spacing: 0.2em;
+    color: var(--gold);
+    margin-bottom: 0.5rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .replay-score-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    border-bottom: 1px solid rgba(61,53,40,0.4);
+    font-size: 0.85rem;
+  }
+  .replay-score-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+  .replay-score-name { flex: 1; }
+  .replay-score-pts { font-family: 'Cinzel', serif; color: var(--gold); }
+  .replay-action-text {
+    margin-top: 0.8rem;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+    font-style: italic;
+    padding: 0.4rem 0.5rem;
+    background: var(--bg-card);
+    border-radius: 4px;
+    border-left: 2px solid var(--gold);
+  }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="replay-shell">
+
+  <div class="replay-header">
+    <div class="replay-title">🎬 REPLAY — {{ game.code }}</div>
+    <a href="/lobbies" class="btn-logout" style="font-family:'Cinzel',serif;font-size:0.68rem;letter-spacing:0.1em;padding:0.35rem 0.8rem;text-decoration:none;border:1px solid var(--border);border-radius:5px;color:var(--text-muted);">← LOBBIES</a>
+    {% if user %}
+    <a href="/account/history" class="btn-logout" style="font-family:'Cinzel',serif;font-size:0.68rem;letter-spacing:0.1em;padding:0.35rem 0.8rem;text-decoration:none;border:1px solid var(--border);border-radius:5px;color:var(--text-muted);">HISTORY</a>
+    {% endif %}
+  </div>
+
+  <div class="replay-body">
+
+    <div class="replay-board-area">
+      <div class="replay-board-container" id="board-container">
+        <img id="board-img" src="{{ url_for('static', filename='images/board.svg') }}"
+             alt="Board" draggable="false"
+             style="max-width:100%;max-height:100%;object-fit:contain;display:block;"/>
+        <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"
+             style="position:absolute;pointer-events:none;"></svg>
+      </div>
+
+      <div class="replay-controls">
+        <button class="replay-btn" id="prev-btn">⏮</button>
+        <button class="replay-btn" id="play-btn">▶ Play</button>
+        <button class="replay-btn" id="next-btn">⏭</button>
+        <input type="range" id="replay-scrubber" min="0" value="0"/>
+        <div class="replay-step-label" id="step-label">— / —</div>
+        <button class="replay-btn" id="speed-btn">1×</button>
+      </div>
+    </div>
+
+    <div class="replay-sidebar">
+      <div class="replay-sidebar-label">SCORES</div>
+      <div id="replay-scores"></div>
+      <div id="replay-action" class="replay-action-text" style="display:none;"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const BOARD_DATA    = {{ board_data | tojson }};
+const REPLAY_DATA   = {{ replay_data | tojson }};
+const PLAYERS_INFO  = {{ players_info | tojson }};
+
+const PLAYER_HEX = {
+  red: '#EF4444', blue: '#3B82F6', green: '#22C55E',
+  yellow: '#EAB308', pink: '#EC4899', orange: '#F97316',
+};
+const CARD_BG = {
+  purple: 'linear-gradient(135deg,#7c3aed,#4c1d95)',
+  blue: 'linear-gradient(135deg,#2563eb,#1e3a8a)',
+  orange: 'linear-gradient(135deg,#ea580c,#9a3412)',
+  white: 'linear-gradient(135deg,#cbd5e1,#94a3b8)',
+  green: 'linear-gradient(135deg,#16a34a,#14532d)',
+  yellow: 'linear-gradient(135deg,#ca8a04,#713f12)',
+  black: 'linear-gradient(135deg,#374151,#111827)',
+  red: 'linear-gradient(135deg,#dc2626,#7f1d1d)',
+  locomotive: 'linear-gradient(160deg,#ef4444 0%,#f97316 18%,#eab308 38%,#22c55e 58%,#3b82f6 78%,#8b5cf6 100%)',
+};
+
+let currentStep = 0;
+let playing = false;
+let playInterval = null;
+let speedIdx = 0;
+const SPEEDS = [2000, 1000, 500];
+const SPEED_LABELS = ['1×', '2×', '4×'];
+
+const scrubber = document.getElementById('replay-scrubber');
+scrubber.max = Math.max(0, REPLAY_DATA.length - 1);
+
+function renderStep(idx) {
+  if (REPLAY_DATA.length === 0) return;
+  const snap = REPLAY_DATA[idx];
+
+  // Board
+  renderReplayBoard(snap.routes || {});
+
+  // Scores sidebar
+  const scoresEl = document.getElementById('replay-scores');
+  scoresEl.innerHTML = Object.entries(PLAYERS_INFO).map(([pid, info]) => {
+    const pts = (snap.scores || {})[pid] || 0;
+    return `<div class="replay-score-row">
+      <div class="replay-score-dot" style="background:${PLAYER_HEX[info.color] || '#888'};"></div>
+      <div class="replay-score-name">${info.name}</div>
+      <div class="replay-score-pts">${pts}</div>
+    </div>`;
+  }).join('');
+
+  // Action text
+  const actionEl = document.getElementById('replay-action');
+  if (snap.action) {
+    actionEl.textContent = snap.action;
+    actionEl.style.display = '';
+  } else {
+    actionEl.style.display = 'none';
+  }
+
+  document.getElementById('step-label').textContent = `${idx + 1} / ${REPLAY_DATA.length}`;
+  scrubber.value = idx;
+}
+
+let boardScale = { x: 1, y: 1, imgX: 0, imgY: 0, imgW: 1024, imgH: 683 };
+
+function recalcBoardScale() {
+  const img = document.getElementById('board-img');
+  const container = document.getElementById('board-container');
+  if (!img.naturalWidth) return;
+  const cw = container.clientWidth, ch = container.clientHeight;
+  const nw = img.naturalWidth, nh = img.naturalHeight;
+  const scale = Math.min(cw / nw, ch / nh);
+  const rw = nw * scale, rh = nh * scale;
+  boardScale = { x: scale, y: scale, imgX: (cw - rw) / 2, imgY: (ch - rh) / 2, imgW: rw, imgH: rh };
+}
+
+function buildRouteSegments(p1, p2, length, side) {
+  const dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+  const dist = Math.sqrt(dx*dx + dy*dy);
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  const segW = (dist / length) * 0.78, segH = 8;
+  const perpX = -dy / dist, perpY = dx / dist;
+  const offsetDist = side === 0 ? -4 : 4;
+  const offX = perpX * offsetDist, offY = perpY * offsetDist;
+  const segs = [];
+  for (let i = 0; i < length; i++) {
+    const t = (i + 0.5) / length;
+    const cx = p1[0] + dx * t + offX, cy = p1[1] + dy * t + offY;
+    segs.push({ x: cx - segW/2, y: cy - segH/2, w: segW, h: segH, angle, cx, cy });
+  }
+  return segs;
+}
+
+function renderReplayBoard(claimedRoutes) {
+  const img = document.getElementById('board-img');
+  if (!img.naturalWidth) { img.onload = () => renderReplayBoard(claimedRoutes); return; }
+  recalcBoardScale();
+
+  const svg = document.getElementById('board-svg');
+  svg.innerHTML = '';
+  svg.setAttribute('viewBox', '0 0 1024 683');
+  svg.setAttribute('width', boardScale.imgW);
+  svg.setAttribute('height', boardScale.imgH);
+  svg.style.left = boardScale.imgX + 'px';
+  svg.style.top = boardScale.imgY + 'px';
+
+  const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+  defs.innerHTML = `<filter id="cshadow" x="-30%" y="-30%" width="160%" height="160%">
+    <feDropShadow dx="0" dy="0" stdDeviation="2" flood-color="rgba(0,0,0,0.7)"/>
+  </filter>`;
+  svg.appendChild(defs);
+
+  const cities = BOARD_DATA.cities;
+  const routes = BOARD_DATA.routes;
+  const segData = BOARD_DATA.route_segments || {};
+
+  for (const route of routes) {
+    const c1 = cities[route.city1], c2 = cities[route.city2];
+    if (!c1 || !c2) continue;
+    const sd = segData[route.id];
+    let segs;
+    if (sd && sd.length === route.length) {
+      const dx = c2[0]-c1[0], dy = c2[1]-c1[1];
+      const dist = Math.sqrt(dx*dx+dy*dy);
+      const segW = (dist / route.length) * 0.78, segH = 8;
+      segs = sd.map(([bx,by,a]) => ({x:bx-segW/2,y:by-segH/2,w:segW,h:segH,angle:a,cx:bx,cy:by}));
+    } else {
+      segs = buildRouteSegments(c1, c2, route.length, route.side || 0);
+    }
+    const claimedBy = claimedRoutes[String(route.id)];
+    for (const seg of segs) {
+      const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+      rect.setAttribute('x', seg.x); rect.setAttribute('y', seg.y);
+      rect.setAttribute('width', seg.w); rect.setAttribute('height', seg.h);
+      rect.setAttribute('transform', `rotate(${seg.angle},${seg.cx},${seg.cy})`);
+      rect.setAttribute('rx', '2');
+      if (claimedBy) {
+        const info = PLAYERS_INFO[claimedBy];
+        rect.setAttribute('fill', info ? (PLAYER_HEX[info.color] || '#888') : '#888');
+        rect.setAttribute('stroke', 'rgba(255,255,255,0.75)');
+        rect.setAttribute('stroke-width', '1.5');
+        rect.setAttribute('filter', 'url(#cshadow)');
+      } else {
+        const rc = route.color === 'gray' ? '#9ca3af' : (BOARD_DATA.card_colors[route.color] || '#888');
+        rect.setAttribute('fill', rc);
+        rect.setAttribute('fill-opacity', '0.45');
+        rect.setAttribute('stroke', 'rgba(255,255,255,0.2)');
+        rect.setAttribute('stroke-width', '1');
+      }
+      svg.appendChild(rect);
+    }
+  }
+
+  for (const [cityName, coords] of Object.entries(cities)) {
+    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+    circle.setAttribute('cx', coords[0]); circle.setAttribute('cy', coords[1]);
+    circle.setAttribute('r', 4);
+    circle.setAttribute('fill', '#1a1512'); circle.setAttribute('stroke', '#c8a84b');
+    circle.setAttribute('stroke-width', '1.5');
+    svg.appendChild(circle);
+  }
+}
+
+// Controls
+document.getElementById('prev-btn').addEventListener('click', () => {
+  stopPlay();
+  currentStep = Math.max(0, currentStep - 1);
+  renderStep(currentStep);
+});
+document.getElementById('next-btn').addEventListener('click', () => {
+  stopPlay();
+  currentStep = Math.min(REPLAY_DATA.length - 1, currentStep + 1);
+  renderStep(currentStep);
+});
+document.getElementById('play-btn').addEventListener('click', togglePlay);
+scrubber.addEventListener('input', () => {
+  stopPlay();
+  currentStep = parseInt(scrubber.value);
+  renderStep(currentStep);
+});
+document.getElementById('speed-btn').addEventListener('click', () => {
+  speedIdx = (speedIdx + 1) % SPEEDS.length;
+  document.getElementById('speed-btn').textContent = SPEED_LABELS[speedIdx];
+  if (playing) { stopPlay(); startPlay(); }
+});
+
+function startPlay() {
+  playing = true;
+  document.getElementById('play-btn').textContent = '⏸ Pause';
+  document.getElementById('play-btn').classList.add('active');
+  playInterval = setInterval(() => {
+    if (currentStep >= REPLAY_DATA.length - 1) { stopPlay(); return; }
+    currentStep++;
+    renderStep(currentStep);
+  }, SPEEDS[speedIdx]);
+}
+function stopPlay() {
+  playing = false;
+  clearInterval(playInterval);
+  document.getElementById('play-btn').textContent = '▶ Play';
+  document.getElementById('play-btn').classList.remove('active');
+}
+function togglePlay() {
+  if (playing) stopPlay(); else startPlay();
+}
+
+window.addEventListener('resize', () => { renderStep(currentStep); });
+
+// Initial render
+if (REPLAY_DATA.length > 0) {
+  renderStep(0);
+} else {
+  document.getElementById('step-label').textContent = 'No replay data';
+  document.getElementById('replay-scores').innerHTML =
+    '<div style="color:var(--text-muted);font-size:0.8rem;">No replay snapshots recorded for this game.</div>';
+}
+</script>
+{% endblock %}

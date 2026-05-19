@@ -190,7 +190,7 @@
         <input type="checkbox" id="set-music"/>
         <div>
           <div class="settings-row-label">Background music</div>
-          <div class="settings-row-desc">Currently unavailable</div>
+          <div class="settings-row-desc">Plays after your first click on the page</div>
         </div>
       </label>
       <label class="settings-row">
@@ -222,7 +222,20 @@
     <h2>🏆 Game Over!</h2>
     <div id="final-scores" class="final-scores"></div>
     <div class="modal-footer">
+      <div id="rematch-btn-container"></div>
       <a href="/lobbies" class="btn-primary">Play Again</a>
+    </div>
+  </div>
+</div>
+
+<div id="undo-vote-modal" class="modal hidden">
+  <div class="modal-backdrop" id="undo-vote-backdrop"></div>
+  <div class="modal-box" style="max-width:360px;text-align:center;">
+    <h2>↩ Undo Request</h2>
+    <p id="undo-vote-desc" class="modal-desc"></p>
+    <div class="modal-footer" style="justify-content:center;">
+      <button class="btn-secondary" id="undo-reject-btn">Decline</button>
+      <button class="btn-primary" id="undo-approve-btn">Approve</button>
     </div>
   </div>
 </div>

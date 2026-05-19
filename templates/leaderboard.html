@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Leaderboard — Ticket to Ride{% endblock %}
+
+{% block body %}
+<div class="lobbies-bg">
+
+  <div class="lobbies-header">
+    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
+    <div class="lobbies-user">
+      {% if user %}
+      <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+      <a href="/account" class="btn-logout">ACCOUNT</a>
+      {% endif %}
+      <a href="/lobbies" class="btn-logout">← LOBBIES</a>
+      <a href="/logout" class="btn-logout">LOGOUT</a>
+    </div>
+  </div>
+
+  <div class="lobbies-body">
+    <div class="lobbies-section-title">🏆 GLOBAL LEADERBOARD</div>
+
+    {% if not players %}
+    <div class="lobby-empty">
+      <p>No ranked players yet. Play a game with a registered account to appear here!</p>
+    </div>
+    {% else %}
+    <table class="leaderboard-table">
+      <thead>
+        <tr>
+          <th class="lb-rank">Rank</th>
+          <th class="lb-name">Player</th>
+          <th class="lb-tier">Tier</th>
+          <th class="lb-elo">ELO</th>
+          <th class="lb-games">Games</th>
+          <th class="lb-won">Won</th>
+          <th class="lb-winrate">Win Rate</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in players %}
+        <tr class="lb-row {% if user and p.id == user.id %}lb-me{% endif %}">
+          <td class="lb-rank">
+            {% if loop.index == 1 %}🥇
+            {% elif loop.index == 2 %}🥈
+            {% elif loop.index == 3 %}🥉
+            {% else %}{{ loop.index }}{% endif %}
+          </td>
+          <td class="lb-name">{{ p.username }}</td>
+          <td class="lb-tier">{{ p.elo_tier }}</td>
+          <td class="lb-elo">{{ p.elo or 1000 }}</td>
+          <td class="lb-games">{{ p.games_played or 0 }}</td>
+          <td class="lb-won">{{ p.games_won or 0 }}</td>
+          <td class="lb-winrate">{{ p.win_rate }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

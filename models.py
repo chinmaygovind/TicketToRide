@@ -65,6 +65,7 @@ class Game(db.Model):
 
     # Full serialized game state as JSON text
     state_json = db.Column(db.Text, default="{}")
+    replay_json = db.Column(db.Text, default="[]")
 
     players = db.relationship("Player", backref="game", lazy=True,
                                order_by="Player.turn_order")
@@ -86,6 +87,32 @@ class Game(db.Model):
             "player_count": len(self.players),
             "players": [p.to_dict() for p in self.players],
         }
+
+
+class Friendship(db.Model):
+    __tablename__ = "friendships"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    friend_id  = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    status     = db.Column(db.String(10), default="pending")  # pending | accepted
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "friend_id"),)
+
+
+class GameResult(db.Model):
+    __tablename__ = "game_results"
+
+    id         = db.Column(db.Integer, primary_key=True)
+    user_id    = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=False)
+    game_code  = db.Column(db.String(10))
+    played_at  = db.Column(db.DateTime, default=datetime.utcnow)
+    placement  = db.Column(db.Integer)   # 1 = winner
+    score      = db.Column(db.Integer)
+    elo_before = db.Column(db.Integer)
+    elo_after  = db.Column(db.Integer)
+    opponents  = db.Column(db.Text)      # JSON list of {name, elo, placement}
 
 
 class Player(db.Model):

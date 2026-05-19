@@ -120,9 +120,12 @@ function _loadAndPlayTrack() {
   _musicAudio.play().catch(() => {});
 }
 
-// First-click handler: just unlock AudioContext (music only plays if user toggles it on)
+// First-click handler: unlock AudioContext and start music if it was enabled
 document.addEventListener('click', function _firstGestureHandler() {
   _unlockAudio();
+  if (musicEnabled && _musicQueue.length && !_musicAudio.src) {
+    _loadAndPlayTrack();
+  }
 }, { once: true });
 
 // ─── Toast notifications ──────────────────────────────────────────────────────
@@ -199,6 +202,43 @@ const CARD_BG = {
   locomotive: 'linear-gradient(160deg, #ef4444 0%, #f97316 18%, #eab308 38%, #22c55e 58%, #3b82f6 78%, #8b5cf6 100%)',
   unknown:    'linear-gradient(135deg, #1e293b, #0f172a)',
 };
+
+// ─── Route graph for ticket path highlight ────────────────────────────────────
+
+function buildRouteGraph() {
+  const adj = {};
+  for (const route of BOARD_DATA.routes) {
+    const a = route.city1, b = route.city2;
+    (adj[a] = adj[a] || []).push({ to: b, id: route.id });
+    (adj[b] = adj[b] || []).push({ to: a, id: route.id });
+  }
+  return adj;
+}
+const ROUTE_GRAPH = buildRouteGraph();
+
+function shortestPath(from, to) {
+  const queue = [[from, []]];
+  const visited = new Set([from]);
+  while (queue.length) {
+    const [city, path] = queue.shift();
+    for (const edge of (ROUTE_GRAPH[city] || [])) {
+      if (visited.has(edge.to)) continue;
+      const newPath = [...path, edge.id];
+      if (edge.to === to) return newPath;
+      visited.add(edge.to);
+      queue.push([edge.to, newPath]);
+    }
+  }
+  return [];
+}
+
+function highlightPath(routeIds, on) {
+  routeIds.forEach(id => {
+    document.querySelectorAll(`[data-route-id="${id}"]`).forEach(el => {
+      el.classList.toggle('path-highlight', on);
+    });
+  });
+}
 
 // Player color hex map (should match server-side)
 const PLAYER_HEX = {
@@ -321,6 +361,7 @@ socket.on('game_state_update', (state) => {
   gameState.winner_id               = state.winner_id;
   gameState.final_round_players_left = state.final_round_players_left;
   gameState.final_round_triggered_by = state.final_round_triggered_by;
+  gameState.has_undo_snapshot = state.has_undo_snapshot;
   // Merge public-only per-player fields without touching hand/tickets
   for (const pid of Object.keys(state.players)) {
     if (gameState.players[pid]) {
@@ -758,6 +799,7 @@ function renderPlayersPanel() {
       <span class="player-row-score">${p.route_score}</span>
       <span class="player-row-trains">🚂${p.trains}</span>
       <span class="player-row-tickets">🎫${p.ticket_count ?? 0}</span>
+      ${!isMe ? `<span class="player-card-count">🎴${p.card_count ?? '?'}</span>` : ''}
     </div>`;
   }).join('');
 }
@@ -874,8 +916,15 @@ function renderTickets() {
         ${completed ? '<span class="ticket-check">✓</span>' : ''}
       </div>
       <div class="ticket-points">${t.points} pts</div>`;
-    div.addEventListener('mouseenter', () => highlightTicketCities(t.city1, t.city2, true));
-    div.addEventListener('mouseleave', () => highlightTicketCities(t.city1, t.city2, false));
+    const pathIds = shortestPath(t.city1, t.city2);
+    div.addEventListener('mouseenter', () => {
+      highlightTicketCities(t.city1, t.city2, true);
+      highlightPath(pathIds, true);
+    });
+    div.addEventListener('mouseleave', () => {
+      highlightTicketCities(t.city1, t.city2, false);
+      highlightPath(pathIds, false);
+    });
     area.appendChild(div);
   });
 }
@@ -962,6 +1011,22 @@ function renderActionButtons() {
   const blindBtn = document.getElementById('draw-blind-btn');
   blindBtn.disabled = !isMyTurn;
   blindBtn.classList.toggle('active-turn', isMyTurn);
+
+  // Undo button — visible when a snapshot exists, it's your turn, and no vote pending
+  let undoBtn = document.getElementById('undo-action-btn');
+  const hasUndo = gameState.has_undo_snapshot && isMyTurn &&
+    (gameState.phase === 'main' || gameState.phase === 'final_round');
+  if (hasUndo && !undoBtn) {
+    undoBtn = document.createElement('button');
+    undoBtn.id = 'undo-action-btn';
+    undoBtn.className = 'action-btn';
+    undoBtn.title = 'Request to undo last action (all players must approve)';
+    undoBtn.textContent = '↩ Request Undo';
+    undoBtn.addEventListener('click', () => socket.emit('request_undo', { code: GAME_CODE }));
+    document.getElementById('draw-tickets-btn').parentElement.appendChild(undoBtn);
+  } else if (!hasUndo && undoBtn) {
+    undoBtn.remove();
+  }
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -1192,8 +1257,23 @@ function showGameOver() {
     </div>`;
   }).join('');
 
+  // Inject rematch button for host (only once)
+  const rematchContainer = document.getElementById('rematch-btn-container');
+  if (rematchContainer && !rematchContainer.querySelector('.rematch-btn') &&
+      !IS_SPECTATOR && gameState.players[MY_PLAYER_ID]?.is_host) {
+    const btn = document.createElement('button');
+    btn.className = 'btn-secondary rematch-btn';
+    btn.textContent = '🔄 Rematch';
+    btn.onclick = () => socket.emit('rematch', { code: GAME_CODE });
+    rematchContainer.appendChild(btn);
+  }
+
   if (!_gameOverDismissed) openModal('gameover-modal');
 }
+
+socket.on('rematch_created', data => {
+  window.location.href = '/lobby/' + data.new_code;
+});
 
 document.getElementById('gameover-close-btn').addEventListener('click', () => {
   _gameOverDismissed = true;
@@ -1413,6 +1493,43 @@ _initMusic();
   };
 })();
 
+// ─── Undo vote handlers ───────────────────────────────────────────────────────
+
+socket.on('undo_requested', data => {
+  // If I'm the requester, just show a toast
+  if (data.player_id && String(data.player_id) === String(MY_PLAYER_ID)) {
+    showToast('↩ Undo request sent — waiting for others to approve.', '#f59e0b', 5000);
+    return;
+  }
+  if (IS_SPECTATOR) return;
+  document.getElementById('undo-vote-desc').textContent =
+    `${escHtml(data.by)} wants to undo their last action. Do you approve?`;
+  openModal('undo-vote-modal');
+});
+
+socket.on('undo_applied', () => {
+  closeModal('undo-vote-modal');
+  showToast('↩ Undo applied!', '#22c55e', 3000);
+});
+
+socket.on('undo_rejected', () => {
+  closeModal('undo-vote-modal');
+  showToast('↩ Undo declined.', '#ef4444', 3000);
+});
+
+document.getElementById('undo-approve-btn').addEventListener('click', () => {
+  socket.emit('vote_undo', { code: GAME_CODE, approve: true });
+  closeModal('undo-vote-modal');
+});
+document.getElementById('undo-reject-btn').addEventListener('click', () => {
+  socket.emit('vote_undo', { code: GAME_CODE, approve: false });
+  closeModal('undo-vote-modal');
+});
+document.getElementById('undo-vote-backdrop').addEventListener('click', () => {
+  socket.emit('vote_undo', { code: GAME_CODE, approve: false });
+  closeModal('undo-vote-modal');
+});
+
 // ─── Keyboard shortcuts ────────────────────────────────────────────────────────
 
 document.addEventListener('keydown', (e) => {
@@ -1429,7 +1546,7 @@ document.addEventListener('keydown', (e) => {
   // Ignore remaining shortcuts when typing or a modal is open
   const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
   if (inInput) return;
-  const modalOpen = ['claim-modal','ticket-modal','settings-modal'].some(
+  const modalOpen = ['claim-modal','ticket-modal','settings-modal','undo-vote-modal'].some(
     id => !document.getElementById(id).classList.contains('hidden')
   );
   if (modalOpen) return;
@@ -1456,6 +1573,36 @@ document.addEventListener('keydown', (e) => {
     return;
   }
 });
+
+// ─── Mobile: swipe between tabs ──────────────────────────────────────────────
+
+function initMobileSwipe() {
+  if (window.innerWidth > 768) return;
+  const panels = ['left', 'board', 'right', 'chat'];
+  let touchStartX = 0, touchStartY = 0;
+
+  document.addEventListener('touchstart', e => {
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+
+  document.addEventListener('touchend', e => {
+    if (e.target.closest('#chat-panel, .modal-box')) return;
+    const dx = e.changedTouches[0].clientX - touchStartX;
+    const dy = e.changedTouches[0].clientY - touchStartY;
+    if (Math.abs(dx) < 60 || Math.abs(dy) > Math.abs(dx)) return;
+
+    const activeTab = document.querySelector('.mobile-tab.active');
+    const currentPanel = activeTab?.dataset.panel;
+    const idx = panels.indexOf(currentPanel);
+    if (idx === -1) return;
+
+    const nextIdx = dx < 0 ? Math.min(idx + 1, panels.length - 1) : Math.max(idx - 1, 0);
+    if (nextIdx !== idx) {
+      document.querySelector(`.mobile-tab[data-panel="${panels[nextIdx]}"]`)?.click();
+    }
+  }, { passive: true });
+}
 
 // ─── Mobile: tab bar & board zoom ────────────────────────────────────────────
 
@@ -1535,4 +1682,6 @@ document.addEventListener('keydown', (e) => {
     recalcBoardScale();
     renderBoard();
   });
+
+  initMobileSwipe();
 })();

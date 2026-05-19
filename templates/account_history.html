@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Match History — {{ user.username }}{% endblock %}
+
+{% block body %}
+<div class="lobbies-bg">
+
+  <div class="lobbies-header">
+    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
+    <div class="lobbies-user">
+      <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+      <a href="/account" class="btn-logout">← ACCOUNT</a>
+      <a href="/lobbies" class="btn-logout">LOBBIES</a>
+      <a href="/logout" class="btn-logout">LOGOUT</a>
+    </div>
+  </div>
+
+  <div class="lobbies-body">
+    <div class="lobbies-section-title">📋 MATCH HISTORY — {{ user.username }}</div>
+
+    {% if not history %}
+    <div class="lobby-empty">
+      <p>No games recorded yet. Play a ranked game to see your history here!</p>
+    </div>
+    {% else %}
+    <table class="leaderboard-table">
+      <thead>
+        <tr>
+          <th>Date</th>
+          <th>Code</th>
+          <th>Result</th>
+          <th>Score</th>
+          <th>ELO Change</th>
+          <th>Opponents</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in history %}
+        <tr class="lb-row">
+          <td style="color:var(--text-muted);font-size:0.8rem;">
+            {{ r.played_at.strftime('%b %d, %Y') if r.played_at else '—' }}
+          </td>
+          <td>
+            <a href="/replay/{{ r.game_code }}" style="color:var(--gold);font-family:'Cinzel',serif;font-size:0.8rem;text-decoration:none;">
+              {{ r.game_code }}
+            </a>
+          </td>
+          <td>
+            {% if r.placement == 1 %}🥇 1st
+            {% elif r.placement == 2 %}🥈 2nd
+            {% elif r.placement == 3 %}🥉 3rd
+            {% else %}{{ r.placement }}th{% endif %}
+          </td>
+          <td style="font-family:'Cinzel',serif;color:var(--gold-light);">{{ r.score }}</td>
+          <td style="font-family:'Cinzel',serif;">
+            {% set delta = (r.elo_after or 1000) - (r.elo_before or 1000) %}
+            <span style="color:{% if delta >= 0 %}#86efac{% else %}#fca5a5{% endif %};">
+              {% if delta >= 0 %}+{% endif %}{{ delta }}
+            </span>
+          </td>
+          <td style="font-size:0.8rem;color:var(--text-muted);">
+            {% for opp in r.opponents_parsed %}
+              <span>{{ opp.name }}{% if not loop.last %}, {% endif %}</span>
+            {% endfor %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

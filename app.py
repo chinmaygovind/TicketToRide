@@ -48,7 +48,7 @@ from flask import (Flask, render_template, request, jsonify,
                    redirect, url_for, session)
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
-from models import db, Game, Player, User
+from models import db, Game, Player, User, GameResult, Friendship
 from game_data import ROUTES, CITIES, DESTINATION_TICKETS, TICKET_BY_ID, PLAYER_COLORS, CARD_COLOR_HEX, BOARD_WIDTH, BOARD_HEIGHT
 from route_segments import ROUTE_SEGMENTS
 import game_logic as logic
@@ -109,6 +109,7 @@ with app.app_context():
         "ALTER TABLE users ADD COLUMN tickets_drawn INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN total_points INTEGER DEFAULT 0",
         "ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)",
+        "ALTER TABLE games ADD COLUMN replay_json TEXT DEFAULT '[]'",
     ]
     with db.engine.connect() as _conn:
         for _stmt in _migration_stmts:
@@ -352,6 +353,20 @@ def account_page():
     return render_template("account.html", user=user)
 
 
+@app.route("/account/history")
+@require_login
+def account_history():
+    user = get_current_user()
+    if not user:
+        return redirect(url_for("login_page"))
+    history = GameResult.query.filter_by(user_id=user.id)\
+                              .order_by(GameResult.played_at.desc())\
+                              .limit(50).all()
+    for h in history:
+        h.opponents_parsed = json_mod.loads(h.opponents or "[]")
+    return render_template("account_history.html", user=user, history=history)
+
+
 @app.route("/account/update", methods=["POST"])
 @require_login
 def account_update():
@@ -510,6 +525,158 @@ def google_setup():
 # HTTP Routes — Lobbies & Game
 # ---------------------------------------------------------------------------
 
+@app.route("/api/friends")
+@require_login
+def api_friends():
+    user = get_current_user()
+    if not user:
+        return jsonify([])
+    accepted = Friendship.query.filter_by(user_id=user.id, status="accepted").all()
+    result = []
+    for f in accepted:
+        friend = db.session.get(User, f.friend_id)
+        if friend:
+            result.append({
+                "id": friend.id,
+                "username": friend.username,
+                "online": friend.id in _online_users,
+                "elo": friend.elo or 1000,
+            })
+    return jsonify(result)
+
+
+@app.route("/api/friend-requests")
+@require_login
+def api_friend_requests():
+    user = get_current_user()
+    if not user:
+        return jsonify([])
+    pending = Friendship.query.filter_by(friend_id=user.id, status="pending").all()
+    result = []
+    for f in pending:
+        sender = db.session.get(User, f.user_id)
+        if sender:
+            result.append({"id": f.id, "username": sender.username, "elo": sender.elo or 1000})
+    return jsonify(result)
+
+
+@app.route("/friends/request", methods=["POST"])
+@require_login
+def friend_request():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    data = request.json or {}
+    username = data.get("username", "").strip()
+    target = User.query.filter_by(username=username).first()
+    if not target:
+        return jsonify({"ok": False, "error": "User not found."}), 404
+    if target.id == user.id:
+        return jsonify({"ok": False, "error": "Cannot friend yourself."}), 400
+    existing = Friendship.query.filter_by(user_id=user.id, friend_id=target.id).first()
+    if existing:
+        return jsonify({"ok": False, "error": "Request already sent or already friends."}), 409
+    # Check reverse (they sent us a request already — auto-accept)
+    reverse = Friendship.query.filter_by(user_id=target.id, friend_id=user.id).first()
+    if reverse and reverse.status == "pending":
+        reverse.status = "accepted"
+        db.session.add(Friendship(user_id=user.id, friend_id=target.id, status="accepted"))
+        db.session.commit()
+        return jsonify({"ok": True, "accepted": True})
+    db.session.add(Friendship(user_id=user.id, friend_id=target.id))
+    db.session.commit()
+    return jsonify({"ok": True, "accepted": False})
+
+
+@app.route("/friends/accept", methods=["POST"])
+@require_login
+def friend_accept():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    data = request.json or {}
+    req_id = data.get("request_id")
+    f = Friendship.query.filter_by(id=req_id, friend_id=user.id, status="pending").first()
+    if not f:
+        return jsonify({"ok": False, "error": "Request not found."}), 404
+    f.status = "accepted"
+    # Add reverse row so both sides see each other
+    reverse = Friendship.query.filter_by(user_id=user.id, friend_id=f.user_id).first()
+    if not reverse:
+        db.session.add(Friendship(user_id=user.id, friend_id=f.user_id, status="accepted"))
+    else:
+        reverse.status = "accepted"
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/friends/decline", methods=["POST"])
+@require_login
+def friend_decline():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    data = request.json or {}
+    req_id = data.get("request_id")
+    f = Friendship.query.filter_by(id=req_id, friend_id=user.id, status="pending").first()
+    if f:
+        db.session.delete(f)
+        db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/friends/remove", methods=["POST"])
+@require_login
+def friend_remove():
+    user = get_current_user()
+    if not user:
+        return jsonify({"ok": False, "error": "Not logged in."}), 401
+    data = request.json or {}
+    friend_id = data.get("friend_id")
+    for f in Friendship.query.filter(
+        ((Friendship.user_id == user.id) & (Friendship.friend_id == friend_id)) |
+        ((Friendship.user_id == friend_id) & (Friendship.friend_id == user.id))
+    ).all():
+        db.session.delete(f)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/replay/<code>")
+@require_login
+def replay_page(code):
+    from flask import abort
+    game = Game.query.filter_by(code=code.upper()).first_or_404()
+    if game.status != "ended":
+        abort(404)
+    try:
+        replay_data = json_mod.loads(game.replay_json or "[]")
+    except Exception:
+        replay_data = []
+    board_data = {
+        "cities": {k: list(v) for k, v in CITIES.items()},
+        "routes": ROUTES,
+        "route_segments": ROUTE_SEGMENTS,
+        "card_colors": CARD_COLOR_HEX,
+        "board_w": BOARD_WIDTH,
+        "board_h": BOARD_HEIGHT,
+    }
+    players_info = {str(p.id): {"name": p.name, "color": p.color} for p in game.players}
+    return render_template("replay.html", game=game, replay_data=replay_data,
+                           board_data=board_data, players_info=players_info,
+                           user=get_current_user())
+
+
+@app.route("/leaderboard")
+@require_login
+def leaderboard():
+    top = User.query.filter(User.games_played > 0)\
+                    .order_by(User.elo.desc())\
+                    .limit(100).all()
+    current_user = get_current_user()
+    return render_template("leaderboard.html", players=top, user=current_user)
+
+
 @app.route("/lobbies")
 @require_login
 def lobbies():
@@ -666,11 +833,24 @@ def game_page(code):
 # ---------------------------------------------------------------------------
 
 _chat_history: dict[str, list] = {}  # game_code -> [{name, msg, ts}, …] max 100
+_undo_snapshots: dict[str, str] = {}  # game_code -> old state_json
+_undo_votes: dict[str, set] = {}     # game_code -> set of player_ids who approved
+_undo_requester: dict[str, int] = {} # game_code -> player_id who requested
+_online_users: dict[int, str] = {}   # user_id -> socket_sid
 
 
 @socketio.on("connect")
 def on_connect():
-    pass
+    user = get_current_user()
+    if user:
+        _online_users[user.id] = request.sid
+
+
+@socketio.on("disconnect")
+def on_disconnect():
+    user = get_current_user()
+    if user:
+        _online_users.pop(user.id, None)
 
 
 @socketio.on("join_lobby")
@@ -819,6 +999,41 @@ def on_kick_player(data):
         _run_bots(game, code)
 
 
+@socketio.on("rematch")
+def on_rematch(data):
+    code = data.get("code", "").upper()
+    game = Game.query.filter_by(code=code).first()
+    if not game or game.status != "ended":
+        return emit("error", {"message": "Game not ended."})
+    sid_key = get_session_key()
+    player = Player.query.filter_by(game_id=game.id, session_key=sid_key).first()
+    if not player or not player.is_host:
+        return emit("error", {"message": "Only the host can rematch."})
+
+    new_code = _make_game_code()
+    new_game = Game(code=new_code, status="waiting", max_players=game.max_players,
+                    is_private=game.is_private, passcode=game.passcode)
+    db.session.add(new_game)
+    db.session.flush()
+
+    old_players = list(game.players)
+    colors = [p.color for p in old_players]
+    random.shuffle(colors)
+    for i, old_p in enumerate(old_players):
+        new_p = Player(
+            game_id=new_game.id,
+            name=old_p.name,
+            color=colors[i],
+            session_key=old_p.session_key,
+            is_host=(old_p.id == player.id),
+            user_id=old_p.user_id,
+            turn_order=i,
+        )
+        db.session.add(new_p)
+    db.session.commit()
+    socketio.emit("rematch_created", {"new_code": new_code}, to=code)
+
+
 @socketio.on("keep_initial_tickets")
 def on_keep_initial_tickets(data):
     code = data.get("code", "").upper()
@@ -877,6 +1092,51 @@ def on_keep_drawn_tickets(data):
     _player_action(code, lambda state, pid: logic.keep_drawn_tickets(state, pid, keep_ids))
 
 
+@socketio.on("request_undo")
+def on_request_undo(data):
+    code = data.get("code", "").upper()
+    game = Game.query.filter_by(code=code, status="playing").first()
+    if not game or code not in _undo_snapshots:
+        return emit("error", {"message": "Nothing to undo."})
+    sid_key = get_session_key()
+    player = Player.query.filter_by(game_id=game.id, session_key=sid_key).first()
+    if not player:
+        return
+    _undo_votes[code] = set()
+    _undo_requester[code] = player.id
+    socketio.emit("undo_requested", {"by": player.name, "player_id": player.id}, to=code)
+
+
+@socketio.on("vote_undo")
+def on_vote_undo(data):
+    code = data.get("code", "").upper()
+    approve = data.get("approve", False)
+    game = Game.query.filter_by(code=code, status="playing").first()
+    if not game or code not in _undo_votes:
+        return
+    sid_key = get_session_key()
+    player = Player.query.filter_by(game_id=game.id, session_key=sid_key).first()
+    if not player:
+        return
+    if not approve:
+        _undo_votes.pop(code, None)
+        _undo_requester.pop(code, None)
+        socketio.emit("undo_rejected", {}, to=code)
+        return
+    _undo_votes[code].add(player.id)
+    # Auto-approve for bots; check if all humans (except requester) have approved
+    human_ids = {p.id for p in game.players if not p.session_key.startswith("bot_")}
+    needed = human_ids - {_undo_requester.get(code)}
+    if _undo_votes[code] >= needed:
+        snap_json = _undo_snapshots.pop(code)
+        game.state_json = snap_json
+        db.session.commit()
+        _undo_votes.pop(code, None)
+        _undo_requester.pop(code, None)
+        _broadcast_state(game, code)
+        socketio.emit("undo_applied", {}, to=code)
+
+
 @socketio.on("send_chat")
 def on_send_chat(data):
     code = data.get("code", "").upper()
@@ -915,13 +1175,36 @@ def _player_action(code: str, action_fn):
         emit("error", {"message": "You are not in this game."})
         return
 
+    old_state_json = game.state_json  # capture before action for undo
     state = game.state
     result = action_fn(state, str(player.id))
     if not result["ok"]:
         emit("error", {"message": result.get("error", "Action failed.")})
         return
 
+    _undo_snapshots[code] = old_state_json
+    _undo_votes.pop(code, None)
+    _undo_requester.pop(code, None)
+
     game.state = state
+
+    # Record slim replay snapshot
+    import time as _time
+    snap = {
+        "t": int(_time.time()),
+        "routes": dict(state.get("claimed_routes", {})),
+        "scores": {pid: pdata.get("route_score", 0)
+                   for pid, pdata in state["player_states"].items()},
+        "face_up": state.get("face_up", []),
+        "action": state.get("action_log", [""])[-1] if state.get("action_log") else "",
+    }
+    try:
+        replay = json_mod.loads(game.replay_json or "[]")
+        replay.append(snap)
+        game.replay_json = json_mod.dumps(replay[-500:])
+    except Exception:
+        pass
+
     db.session.commit()
     _broadcast_state(game, code)
     _run_bots(game, code)
@@ -976,19 +1259,38 @@ def _finalize_game_stats(game: Game, state: dict):
             delta /= len(opponents)
         elo_deltas[pid] = round(delta)
 
-    # Apply stats updates
+    # Apply stats updates and record match history
     for pid, user in pid_to_user.items():
         if pid not in scores:
             continue
         ps = state["player_states"].get(pid, {})
         sc = scores[pid]
+        elo_before = user.elo or 1000
         user.games_played = (user.games_played or 0) + 1
         if pid == winner_id:
             user.games_won = (user.games_won or 0) + 1
         user.trains_placed = (user.trains_placed or 0) + max(0, 45 - ps.get("trains", 45))
         user.tickets_drawn = (user.tickets_drawn or 0) + len(ps.get("tickets", []))
         user.total_points  = (user.total_points or 0) + max(0, sc.get("total", 0))
-        user.elo = max(100, (user.elo or 1000) + elo_deltas.get(pid, 0))
+        user.elo = max(100, elo_before + elo_deltas.get(pid, 0))
+
+        # Record per-game result
+        placement = ranked_pids.index(pid) + 1
+        opponent_list = [
+            {"name": pid_to_user[opid].username if opid in pid_to_user else pid_to_player[opid].name,
+             "elo": scores[opid].get("total", 0),
+             "placement": ranked_pids.index(opid) + 1}
+            for opid in ranked_pids if opid != pid
+        ]
+        db.session.add(GameResult(
+            user_id    = user.id,
+            game_code  = game.code,
+            placement  = placement,
+            score      = sc.get("total", 0),
+            elo_before = elo_before,
+            elo_after  = user.elo,
+            opponents  = json_mod.dumps(opponent_list),
+        ))
 
     db.session.commit()
 
@@ -1017,6 +1319,7 @@ def _broadcast_state(game: Game, code: str):
     generic = logic.get_public_state(state, "")
     generic["host_player_id"] = host_id
     generic["bot_player_ids"] = bot_ids
+    generic["has_undo_snapshot"] = code in _undo_snapshots
     socketio.emit("game_state_update", generic, to=code)
 
 

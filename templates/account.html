@@ -9,6 +9,7 @@
     <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
     <div class="lobbies-user">
       <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+      <a href="/account/history" class="btn-logout">HISTORY</a>
       <a href="/lobbies" class="btn-logout">← LOBBIES</a>
       <a href="/logout" class="btn-logout">LOGOUT</a>
     </div>
@@ -157,6 +158,31 @@
 
       <div class="account-divider"></div>
 
+      <!-- Friends -->
+      <div class="account-section-title" style="margin-top:0;">FRIENDS</div>
+
+      <div class="account-field-group">
+        <div class="account-field-label">ADD FRIEND BY USERNAME</div>
+        <div class="account-field-row">
+          <input type="text" class="account-input" id="friend-username-input"
+                 placeholder="username" maxlength="30" autocomplete="off"/>
+          <button class="account-save-btn" id="friend-add-btn">Send Request</button>
+        </div>
+        <div class="account-field-hint" id="hint-friend"></div>
+      </div>
+
+      <div id="pending-requests-section" style="display:none;">
+        <div class="account-field-label" style="margin-top:0.6rem;">PENDING REQUESTS</div>
+        <div id="pending-requests-list"></div>
+      </div>
+
+      <div id="friends-list-section">
+        <div class="account-field-label" style="margin-top:0.6rem;">YOUR FRIENDS</div>
+        <div id="friends-list"><div style="color:var(--text-muted);font-size:0.8rem;">Loading…</div></div>
+      </div>
+
+      <div class="account-divider"></div>
+
       <div style="text-align:center;">
         <a href="/logout" class="account-danger-link">Sign out of this account</a>
       </div>
@@ -218,6 +244,104 @@ document.querySelectorAll('.account-save-btn').forEach(btn => {
 document.getElementById('field-password').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.querySelector('[data-field="password"]').click();
 });
+
+// ─── Friends ───────────────────────────────────────────────────────────────────
+
+async function loadFriends() {
+  const [friendsRes, reqRes] = await Promise.all([
+    fetch('/api/friends'),
+    fetch('/api/friend-requests'),
+  ]);
+  const friends = await friendsRes.json();
+  const requests = await reqRes.json();
+
+  const pendingSection = document.getElementById('pending-requests-section');
+  const pendingList = document.getElementById('pending-requests-list');
+  if (requests.length > 0) {
+    pendingSection.style.display = '';
+    pendingList.innerHTML = requests.map(r => `
+      <div class="friend-row" id="req-${r.id}">
+        <span class="friend-name">${r.username}</span>
+        <span class="friend-elo">${r.elo} ELO</span>
+        <button class="account-save-btn" style="margin-left:auto;" onclick="acceptFriend(${r.id})">Accept</button>
+        <button class="account-save-btn" style="background:transparent;border-color:var(--border);" onclick="declineFriend(${r.id})">Decline</button>
+      </div>`).join('');
+  } else {
+    pendingSection.style.display = 'none';
+  }
+
+  const listEl = document.getElementById('friends-list');
+  if (friends.length === 0) {
+    listEl.innerHTML = '<div style="color:var(--text-muted);font-size:0.8rem;">No friends yet — send a request above!</div>';
+  } else {
+    listEl.innerHTML = friends.map(f => `
+      <div class="friend-row" id="friend-${f.id}">
+        <span class="friend-online-dot" style="background:${f.online ? '#22c55e' : '#4b5563'};"
+              title="${f.online ? 'Online' : 'Offline'}"></span>
+        <span class="friend-name">${f.username}</span>
+        <span class="friend-elo">${f.elo} ELO</span>
+        <button class="account-save-btn"
+                style="margin-left:auto;font-size:0.62rem;padding:0.3rem 0.6rem;border-color:var(--border);color:var(--text-muted);"
+                onclick="removeFriend(${f.id}, '${f.username}')">Remove</button>
+      </div>`).join('');
+  }
+}
+
+async function acceptFriend(reqId) {
+  const res = await fetch('/friends/accept', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({request_id: reqId}),
+  });
+  const d = await res.json();
+  if (d.ok) loadFriends();
+}
+
+async function declineFriend(reqId) {
+  const res = await fetch('/friends/decline', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({request_id: reqId}),
+  });
+  const d = await res.json();
+  if (d.ok) loadFriends();
+}
+
+async function removeFriend(friendId, name) {
+  if (!confirm(`Remove ${name} from friends?`)) return;
+  const res = await fetch('/friends/remove', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({friend_id: friendId}),
+  });
+  const d = await res.json();
+  if (d.ok) loadFriends();
+}
+
+document.getElementById('friend-add-btn').addEventListener('click', async () => {
+  const username = document.getElementById('friend-username-input').value.trim();
+  const hintEl = document.getElementById('hint-friend');
+  hintEl.textContent = '';
+  hintEl.className = 'account-field-hint';
+  if (!username) return;
+  const res = await fetch('/friends/request', {
+    method: 'POST', headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({username}),
+  });
+  const d = await res.json();
+  if (d.ok) {
+    hintEl.textContent = d.accepted ? `✓ Now friends with ${username}!` : `✓ Request sent to ${username}`;
+    hintEl.classList.add('hint-ok');
+    document.getElementById('friend-username-input').value = '';
+    loadFriends();
+  } else {
+    hintEl.textContent = d.error || 'Failed.';
+    hintEl.classList.add('hint-err');
+  }
+});
+
+document.getElementById('friend-username-input').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('friend-add-btn').click();
+});
+
+loadFriends();
 
 // Notify toggle
 document.getElementById('notify-toggle-btn').addEventListener('click', async () => {
