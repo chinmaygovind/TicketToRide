@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Lobby — {{ game.code }}{% endblock %}
+{% block title %}Ticket to Ride: Waiting to Start…{% endblock %}
 
 {% block body %}
 <div class="lobby-bg">
@@ -25,7 +25,7 @@
         {% for p in game.players %}
         <div class="player-entry" data-id="{{ p.id }}">
           <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280','pink':'#EC4899','orange':'#F97316'}[p.color] }};"></div>
-          <span class="player-name">{{ p.name }}</span>
+          <span class="player-name">{{ p.name }}{% if p.linked_user %} <span class="player-elo">| {{ p.linked_user.elo or 1000 }}</span>{% endif %}</span>
           {% if p.is_host %}<span class="host-badge">HOST</span>{% endif %}
           {% if p.session_key.startswith('bot_') %}<span class="bot-badge">BOT</span>{% endif %}
           {% if p.id == player.id %}<span class="you-badge">YOU</span>{% endif %}
@@ -137,7 +137,7 @@ function updatePlayerList(players) {
   list.innerHTML = players.map(p => `
     <div class="player-entry">
       <div class="player-dot" style="background:${COLOR_HEX[p.color] || '#888'};box-shadow:0 0 6px ${COLOR_HEX[p.color] || '#888'};"></div>
-      <span class="player-name">${escapeHtml(p.name)}</span>
+      <span class="player-name">${escapeHtml(p.name)}${p.elo != null ? ' <span class="player-elo">| ' + p.elo + '</span>' : ''}</span>
       ${p.is_host ? '<span class="host-badge">HOST</span>' : ''}
       ${p.is_bot ? '<span class="bot-badge">BOT</span>' : ''}
       ${p.id === PLAYER_ID ? '<span class="you-badge">YOU</span>' : ''}

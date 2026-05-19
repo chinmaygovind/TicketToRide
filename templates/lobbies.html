@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ticket to Ride — Lobbies{% endblock %}
+{% block title %}Ticket to Ride: Lobby{% endblock %}
 
 {% block body %}
 <div class="lobbies-bg">
@@ -9,7 +9,7 @@
     <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
     <div class="lobbies-user">
       {% if user %}
-        <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
+        <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong> &nbsp;·&nbsp; Rating: <strong>{{ user.elo or 1000 }}</strong></span>
         <button class="btn-notify {% if notify_new_game %}active{% endif %}"
                 id="notify-btn"
                 title="{% if notify_new_game %}Notifications on — click to turn off{% else %}Get notified when a new game starts{% endif %}">

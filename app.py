@@ -639,6 +639,9 @@ def game_page(code):
 # Socket.IO Events
 # ---------------------------------------------------------------------------
 
+_chat_history: dict[str, list] = {}  # game_code -> [{name, msg, ts}, …] max 100
+
+
 @socketio.on("connect")
 def on_connect():
     pass
@@ -717,6 +720,8 @@ def on_join_game_room(data):
         spectator_name = data.get("spectator_name", "").strip()
         if spectator_name:
             socketio.emit("spectator_joined", {"name": spectator_name}, to=code)
+
+    emit("chat_history", _chat_history.get(code, []))
 
 
 @socketio.on("add_bot")
@@ -844,6 +849,29 @@ def on_keep_drawn_tickets(data):
     code = data.get("code", "").upper()
     keep_ids = data.get("keep_ids", [])
     _player_action(code, lambda state, pid: logic.keep_drawn_tickets(state, pid, keep_ids))
+
+
+@socketio.on("send_chat")
+def on_send_chat(data):
+    code = data.get("code", "").upper()
+    msg = data.get("msg", "").strip()
+    if not msg or len(msg) > 200:
+        return
+    game = Game.query.filter_by(code=code).first()
+    if not game:
+        return
+    sk = get_session_key()
+    player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if player:
+        sender_name = player.name
+    else:
+        sender_name = (data.get("spectator_name") or "").strip() or "Spectator"
+    chat_msg = {"name": sender_name, "msg": msg}
+    history = _chat_history.setdefault(code, [])
+    history.append(chat_msg)
+    if len(history) > 100:
+        del history[0]
+    socketio.emit("chat_message", chat_msg, to=code)
 
 
 # ---------------------------------------------------------------------------

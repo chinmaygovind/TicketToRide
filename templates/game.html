@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ticket to Ride — Game{% endblock %}
+{% block title %}Ticket to Ride: Game{% endblock %}
 
 {% block head %}
 <style>
@@ -20,7 +20,7 @@
       <div class="sidebar-label">FACE-UP CARDS</div>
       <div id="face-up-cards" class="face-up-area"></div>
       <button class="draw-blind-btn" id="draw-blind-btn" title="Draw blind from deck">
-        🂠 Draw from Deck
+        🃏 Draw from Deck
         <span id="deck-count" class="deck-count">110</span>
       </button>
     </div>
@@ -46,7 +46,7 @@
       <div class="sidebar-label">YOUR TICKETS</div>
       <div id="tickets-panel" class="tickets-area"></div>
       <button class="action-btn tickets-draw-btn" id="draw-tickets-btn">
-        📋 Draw Destination Tickets
+        🎫 Draw Destination Tickets
         <span id="dest-count" class="deck-count">30</span>
       </button>
     </div>
@@ -105,6 +105,20 @@
   <button class="mobile-zoom-btn" id="zoom-out-btn" title="Zoom Out">−</button>
 </div>
 
+
+<!-- ===== CHAT PANEL ===== -->
+<div id="chat-panel" class="chat-panel">
+  <div class="chat-header" id="chat-toggle-header">
+    <span class="chat-header-label">💬 CHAT</span>
+    <span id="chat-unread" class="chat-unread hidden"></span>
+    <button id="chat-toggle-btn" class="chat-toggle-btn" title="Toggle chat">−</button>
+  </div>
+  <div id="chat-messages" class="chat-messages"></div>
+  <div class="chat-input-row">
+    <input type="text" id="chat-input" class="chat-input" placeholder="Message… (M)" maxlength="200" autocomplete="off"/>
+    <button id="chat-send-btn" class="chat-send-btn" title="Send">↵</button>
+  </div>
+</div>
 
 <!-- ===== MODALS ===== -->
 
@@ -183,6 +197,22 @@
         </div>
       </label>
     </div>
+    {% if user %}
+    <div style="margin-top:1rem;padding-top:0.8rem;border-top:1px solid var(--border);">
+      <div style="font-family:'Cinzel',serif;font-size:0.68rem;letter-spacing:0.15em;color:var(--text-muted);margin-bottom:0.5rem;">USERNAME</div>
+      <div style="display:flex;gap:0.4rem;">
+        <input type="text" id="set-username-input" value="{{ user.username }}"
+               style="flex:1;padding:0.4rem 0.6rem;background:var(--bg-dark);border:1px solid var(--border);
+                      border-radius:5px;color:var(--text);font-size:0.85rem;font-family:'Crimson Text',serif;"
+               maxlength="30" autocomplete="off"/>
+        <button id="set-username-btn"
+                style="padding:0.4rem 0.7rem;background:transparent;border:1px solid var(--gold);
+                       border-radius:5px;color:var(--gold);font-family:'Cinzel',serif;font-size:0.7rem;
+                       letter-spacing:0.05em;cursor:pointer;white-space:nowrap;transition:background 0.15s;">Save</button>
+      </div>
+      <div id="set-username-hint" style="font-size:0.72rem;margin-top:0.3rem;min-height:1em;color:var(--text-muted);"></div>
+    </div>
+    {% endif %}
   </div>
 </div>
 

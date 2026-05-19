@@ -101,7 +101,10 @@ class Player(db.Model):
     is_host = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    linked_user = db.relationship("User", foreign_keys="Player.user_id", lazy="select")
+
     def to_dict(self):
+        elo = self.linked_user.elo if self.linked_user else None
         return {
             "id": self.id,
             "name": self.name,
@@ -109,4 +112,5 @@ class Player(db.Model):
             "turn_order": self.turn_order,
             "is_host": self.is_host,
             "is_bot": self.session_key.startswith("bot_"),
+            "elo": elo,
         }

@@ -7,6 +7,7 @@ let gameState = null;
 let amHost = false;
 let botPlayerIds = [];
 let pendingRouteId = null;
+let myChatName = IS_SPECTATOR ? SPECTATOR_NAME : '';
 
 // ─── Transition tracking ──────────────────────────────────────────────────────
 let prevCurrentPlayerId = null;
@@ -288,6 +289,9 @@ socket.on('game_state', (state) => {
   gameState = state;
   if (state.is_host !== undefined) amHost = state.is_host;
   if (state.bot_player_ids) botPlayerIds = state.bot_player_ids;
+  if (!myChatName && MY_PLAYER_ID && state.players && state.players[MY_PLAYER_ID]) {
+    myChatName = state.players[MY_PLAYER_ID].name;
+  }
   renderAll();
 });
 
@@ -1216,6 +1220,10 @@ socket.on('all_tickets', (tickets) => {
 
 function _applySettings() {
   document.getElementById('scoring-section').style.display = scoringVisible ? '' : 'none';
+  const ticketsSection = document.getElementById('tickets-section');
+  if (ticketsSection) {
+    ticketsSection.style.maxHeight = scoringVisible ? '' : '55vh';
+  }
 }
 
 function openSettings() {
@@ -1265,6 +1273,167 @@ if (_loadSetting('ttr_music', false)) {
 
 // Kick off background music
 _initMusic();
+
+// ─── Username change (settings modal) ─────────────────────────────────────────
+
+(function initUsernameChange() {
+  const btn = document.getElementById('set-username-btn');
+  if (!btn) return;
+  btn.addEventListener('click', async () => {
+    const input = document.getElementById('set-username-input');
+    const hint  = document.getElementById('set-username-hint');
+    const newName = input.value.trim();
+    if (!newName) return;
+    hint.textContent = 'Saving…';
+    hint.style.color = 'var(--text-muted)';
+    try {
+      const res = await fetch('/account/update', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ field: 'username', value: newName }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        hint.textContent = 'Saved!';
+        hint.style.color = '#22c55e';
+        setTimeout(() => { hint.textContent = ''; }, 2500);
+      } else {
+        hint.textContent = json.error || 'Failed.';
+        hint.style.color = '#ef4444';
+      }
+    } catch (_) {
+      hint.textContent = 'Network error.';
+      hint.style.color = '#ef4444';
+    }
+  });
+  // Allow Enter key inside the input
+  document.getElementById('set-username-input').addEventListener('keydown', e => {
+    if (e.key === 'Enter') btn.click();
+  });
+})();
+
+// ─── Chat ──────────────────────────────────────────────────────────────────────
+
+(function initChat() {
+  const panel        = document.getElementById('chat-panel');
+  const messagesEl   = document.getElementById('chat-messages');
+  const inputEl      = document.getElementById('chat-input');
+  const sendBtn      = document.getElementById('chat-send-btn');
+  const toggleBtn    = document.getElementById('chat-toggle-btn');
+  const toggleHeader = document.getElementById('chat-toggle-header');
+  const unreadEl     = document.getElementById('chat-unread');
+  if (!panel) return;
+
+  let collapsed     = false;
+  let unreadCount   = 0;
+
+  function setUnread(n) {
+    unreadCount = n;
+    if (n > 0) {
+      unreadEl.textContent = n;
+      unreadEl.classList.remove('hidden');
+    } else {
+      unreadEl.classList.add('hidden');
+    }
+  }
+
+  function toggleCollapse() {
+    collapsed = !collapsed;
+    panel.classList.toggle('chat-collapsed', collapsed);
+    toggleBtn.textContent = collapsed ? '+' : '−';
+    if (!collapsed) {
+      setUnread(0);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+  }
+
+  toggleHeader.addEventListener('click', toggleCollapse);
+
+  function appendMsg(data, scrollImmediate) {
+    const isMe = myChatName && data.name === myChatName;
+    const div = document.createElement('div');
+    div.className = 'chat-msg' + (isMe ? ' chat-mine' : '');
+    div.innerHTML =
+      `<span class="chat-msg-name">${escHtml(data.name)}:</span>` +
+      `<span class="chat-msg-text">${escHtml(data.msg)}</span>`;
+    messagesEl.appendChild(div);
+    if (scrollImmediate) messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function sendChat() {
+    const msg = inputEl.value.trim();
+    if (!msg) return;
+    socket.emit('send_chat', { code: GAME_CODE, msg, spectator_name: SPECTATOR_NAME });
+    inputEl.value = '';
+  }
+
+  sendBtn.addEventListener('click', sendChat);
+  inputEl.addEventListener('keydown', e => {
+    if (e.key === 'Enter') { sendChat(); e.preventDefault(); }
+    e.stopPropagation(); // don't fire game keybinds while typing
+  });
+
+  socket.on('chat_history', (messages) => {
+    messagesEl.innerHTML = '';
+    messages.forEach(m => appendMsg(m, false));
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+
+  socket.on('chat_message', (data) => {
+    appendMsg(data, !collapsed);
+    if (collapsed) setUnread(unreadCount + 1);
+  });
+
+  // Expose focus function for keybind
+  window._focusChat = () => {
+    if (collapsed) toggleCollapse();
+    inputEl.focus();
+  };
+})();
+
+// ─── Keyboard shortcuts ────────────────────────────────────────────────────────
+
+document.addEventListener('keydown', (e) => {
+  // M — focus chat (even from within inputs)
+  if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+    if (!inInput) {
+      e.preventDefault();
+      if (window._focusChat) window._focusChat();
+    }
+    return;
+  }
+
+  // Ignore remaining shortcuts when typing or a modal is open
+  const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
+  if (inInput) return;
+  const modalOpen = ['claim-modal','ticket-modal','settings-modal'].some(
+    id => !document.getElementById(id).classList.contains('hidden')
+  );
+  if (modalOpen) return;
+
+  const myTurn = gameState &&
+    gameState.current_player_id === MY_PLAYER_ID &&
+    (gameState.phase === 'main' || gameState.phase === 'final_round');
+
+  // D — blind draw (only on your turn)
+  if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (myTurn && !IS_SPECTATOR) {
+      e.preventDefault();
+      document.getElementById('draw-blind-btn').click();
+    }
+    return;
+  }
+
+  // T — draw destination tickets (only on your turn, not mid-draw)
+  if ((e.key === 't' || e.key === 'T') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    if (myTurn && !IS_SPECTATOR && gameState.draw_step === 0) {
+      e.preventDefault();
+      document.getElementById('draw-tickets-btn').click();
+    }
+    return;
+  }
+});
 
 // ─── Mobile: tab bar & board zoom ────────────────────────────────────────────
 
