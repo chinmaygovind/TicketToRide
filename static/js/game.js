@@ -807,7 +807,14 @@ function renderTickets() {
   }
 
   area.innerHTML = '';
-  me.tickets.forEach(tid => {
+  // Sort: incomplete first, completed at the bottom
+  const sorted = [...me.tickets].sort((a, b) => {
+    const ta = getTicketById(a), tb = getTicketById(b);
+    const ca = ta ? isTicketCompleted(ta) : false;
+    const cb = tb ? isTicketCompleted(tb) : false;
+    return ca - cb;
+  });
+  sorted.forEach(tid => {
     const t = getTicketById(tid);
     if (!t) return;
     const completed = isTicketCompleted(t);
