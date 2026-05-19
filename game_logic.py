@@ -384,18 +384,15 @@ def _next_turn(state: dict):
 
 
 def _trigger_final_round(state: dict, triggering_player_id: str):
-    """Set up the final round: only players AFTER the triggering player get one last turn."""
+    """Set up the final round: all other players get one last turn, then the triggering player too."""
     state["phase"] = "final_round"
     state["final_round_triggered_by"] = triggering_player_id
     order = state["turn_order"]
     idx = order.index(triggering_player_id)
-    # Triggering player already took their turn — only those after them get one final turn
+    # Order: players after trigger go first, triggering player gets the very last turn
     remaining = [order[(idx + i + 1) % len(order)] for i in range(len(order) - 1)]
+    remaining.append(triggering_player_id)
     state["final_round_players_left"] = remaining
-
-    if not remaining:
-        _end_game(state)
-        return
 
     state["current_player_id"] = order[(idx + 1) % len(order)]
     state["draw_step"] = 0
