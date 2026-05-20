@@ -2,7 +2,8 @@
 """Find swapped cities by comparing detected positions with expected positions."""
 import math
 from city_coords import CITIES as detected
-from game_data import CITIES as expected
+import sys, os; sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+from game_data_old import CITIES as expected
 
 def dist(p1, p2):
     return math.hypot(p1[0]-p2[0], p1[1]-p2[1])

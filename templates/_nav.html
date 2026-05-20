@@ -1,0 +1,17 @@
+<nav class="site-nav">
+  <a class="site-nav-logo" href="/lobbies">🚂 TICKET TO RIDE</a>
+  <div class="site-nav-right">
+    {% if user %}
+      <span class="site-nav-user">Playing as <strong>{{ user.username }}</strong> &nbsp;·&nbsp; Rating: <strong>{{ user.elo or 1000 }}</strong></span>
+    {% elif guest_name %}
+      <span class="site-nav-user">Playing as <strong>{{ guest_name }}</strong> <span class="guest-badge">GUEST</span></span>
+    {% endif %}
+    <a href="/lobbies" class="site-nav-link {% if active_page == 'lobbies' %}active{% endif %}">LOBBIES</a>
+    <a href="/leaderboard" class="site-nav-link {% if active_page == 'leaderboard' %}active{% endif %}">LEADERBOARD</a>
+    {% if user %}
+      <a href="/account" class="site-nav-link {% if active_page == 'account' %}active{% endif %}">ACCOUNT</a>
+    {% else %}
+      <a href="/login?register=1" class="site-nav-link">CREATE ACCOUNT</a>
+    {% endif %}
+  </div>
+</nav>

@@ -3,94 +3,111 @@
 
 {% block body %}
 <div class="lobby-bg">
-  <div class="lobby-container">
 
-    <div class="lobby-header">
-      <a href="/lobbies" class="lobby-back-link">← Back to Lobbies</a>
-      <h1 class="lobby-title">TICKET TO RIDE</h1>
-      <div class="lobby-subtitle">
-        Game Lobby
-        {% if game.is_private %}
-        <span class="lobby-privacy-badge badge-private-pill">🔒 PRIVATE</span>
+  <!-- Minimal header -->
+  <div class="lobby-top-bar">
+    <a href="/lobbies" class="lobby-back-link">← Lobbies</a>
+    <div class="lobby-top-title">
+      <span class="lobby-title-text">TICKET TO RIDE</span>
+      {% if game.is_private %}
+      <span class="lobby-privacy-badge badge-private-pill">🔒 PRIVATE</span>
+      {% else %}
+      <span class="lobby-privacy-badge badge-public-pill">🌐 PUBLIC</span>
+      {% endif %}
+      <span class="lobby-map-badge">{% if game.map_variant == 'europe' %}🌍 EUROPE{% else %}🗺 NORTH AMERICA{% endif %}</span>
+    </div>
+    <div style="width:80px;"></div><!-- spacer -->
+  </div>
+
+  <!-- Two-column grid -->
+  <div class="lobby-grid">
+
+    <!-- LEFT: Players + Actions + Code -->
+    <div class="lobby-left">
+
+      <div class="lobby-panel">
+        <div class="section-title">PLAYERS (<span id="player-count">{{ game.players|length }}</span> / {{ game.max_players }})</div>
+        <div id="player-list" class="player-list">
+          {% for p in game.players %}
+          <div class="player-entry" data-id="{{ p.id }}">
+            <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280','pink':'#EC4899','orange':'#F97316'}[p.color] }};"></div>
+            <span class="player-name">{{ p.name }}{% if p.linked_user %} <span class="player-elo">| {{ p.linked_user.elo or 1000 }}</span>{% endif %}</span>
+            {% if p.is_host %}<span class="host-badge">HOST</span>{% endif %}
+            {% if p.session_key.startswith('bot_') %}<span class="bot-badge">BOT</span>{% endif %}
+            {% if p.id == player.id %}<span class="you-badge">YOU</span>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+
+      <div class="lobby-panel lobby-actions">
+        {% if player.is_host %}
+        <div class="host-controls">
+          <button id="start-btn" class="btn-start">Start Game</button>
+          <button id="add-bot-btn" class="btn-add-bot">+ Add Bot</button>
+        </div>
+        <div class="start-hint">Minimum 2 players required.</div>
         {% else %}
-        <span class="lobby-privacy-badge badge-public-pill">🌐 PUBLIC</span>
+        <div class="waiting-msg">
+          <div class="spinner"></div>
+          Waiting for the host…
+        </div>
         {% endif %}
       </div>
-    </div>
 
-    <!-- Players List -->
-    <div class="lobby-players">
-      <div class="section-title">PLAYERS (<span id="player-count">{{ game.players|length }}</span> / {{ game.max_players }})</div>
-      <div id="player-list" class="player-list">
-        {% for p in game.players %}
-        <div class="player-entry" data-id="{{ p.id }}">
-          <div class="player-dot" style="background:{{ {'blue':'#3B82F6','red':'#EF4444','green':'#22C55E','yellow':'#EAB308','black':'#6B7280','pink':'#EC4899','orange':'#F97316'}[p.color] }};"></div>
-          <span class="player-name">{{ p.name }}{% if p.linked_user %} <span class="player-elo">| {{ p.linked_user.elo or 1000 }}</span>{% endif %}</span>
-          {% if p.is_host %}<span class="host-badge">HOST</span>{% endif %}
-          {% if p.session_key.startswith('bot_') %}<span class="bot-badge">BOT</span>{% endif %}
-          {% if p.id == player.id %}<span class="you-badge">YOU</span>{% endif %}
+      <div class="lobby-panel code-box">
+        <div class="code-label">
+          {% if game.is_private %}SHARE WITH FRIENDS{% else %}SHARE THIS CODE{% endif %}
         </div>
-        {% endfor %}
+        <div class="code-display" id="game-code">{{ game.code }}</div>
+        {% if game.is_private and game.passcode %}
+        <div class="passcode-display">Passcode: <span class="passcode-value">{{ game.passcode }}</span></div>
+        {% endif %}
+        <button class="copy-btn" id="copy-btn" title="Copy invite link">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+          </svg>
+          Copy Link
+        </button>
+        <div id="copy-feedback" class="copy-feedback hidden">Copied!</div>
       </div>
-    </div>
 
-    <!-- Rules + Scoring combined -->
-    <div class="lobby-rules">
-      <div class="section-title">HOW TO PLAY</div>
-      <ul class="rules-list">
-        <li>On your turn: <strong>draw 2 train cards</strong>, <strong>claim a route</strong>, or <strong>draw destination tickets</strong>.</li>
-        <li>Claim routes by playing matching colored cards equal to route length. Locomotives are wild.</li>
-        <li>Complete destination tickets for bonus points; incomplete ones cost points.</li>
-        <li>Game ends when a player has ≤2 trains left. <strong>10 pts</strong> for the Longest Continuous Path.</li>
-      </ul>
-      <div class="score-chips" style="margin-top:0.75rem;">
-        <div class="score-chip"><span>1</span><span>1 pt</span></div>
-        <div class="score-chip"><span>2</span><span>2 pts</span></div>
-        <div class="score-chip"><span>3</span><span>4 pts</span></div>
-        <div class="score-chip"><span>4</span><span>7 pts</span></div>
-        <div class="score-chip"><span>5</span><span>10 pts</span></div>
-        <div class="score-chip"><span>6</span><span>15 pts</span></div>
-      </div>
-    </div>
+    </div><!-- /lobby-left -->
 
-    <!-- Actions -->
-    <div class="lobby-actions">
-      {% if player.is_host %}
-      <div class="host-controls">
-        <button id="start-btn" class="btn-start">Start Game</button>
-        <button id="add-bot-btn" class="btn-add-bot">+ Add Bot</button>
-      </div>
-      <div class="start-hint">Minimum 2 players required. Bots play automatically.</div>
-      {% else %}
-      <div class="waiting-msg">
-        <div class="spinner"></div>
-        Waiting for the host to start the game…
-      </div>
-      {% endif %}
-    </div>
+    <!-- RIGHT: Rules + Scoring -->
+    <div class="lobby-right">
 
-    <!-- Game Code / Invite -->
-    <div class="code-box">
-      <div class="code-label">
-        {% if game.is_private %}SHARE THESE WITH FRIENDS TO INVITE THEM{% else %}SHARE THIS CODE TO INVITE FRIENDS{% endif %}
+      <div class="lobby-panel lobby-rules">
+        <div class="section-title">HOW TO PLAY</div>
+        <ul class="rules-list">
+          <li>On your turn: <strong>draw 2 train cards</strong>, <strong>claim a route</strong>, or <strong>draw destination tickets</strong>.</li>
+          <li>Claim routes by playing matching colored cards equal to route length. Locomotives are wild.</li>
+          <li>Complete destination tickets for bonus points; incomplete ones cost points.</li>
+          <li>Game ends when a player has ≤2 trains left. <strong>10 pts</strong> for the Longest Continuous Path.</li>
+          {% if game.map_variant == 'europe' %}
+          <li><strong>Tunnels:</strong> draw 3 extra cards — pay matching cards revealed or abort.</li>
+          <li><strong>Ferries:</strong> require locomotive cards for the ferry spaces.</li>
+          <li><strong>Stations:</strong> 3 per player. Place on a city to use one opponent route there. Unused = +4 pts each.</li>
+          {% endif %}
+        </ul>
       </div>
-      <div class="code-display" id="game-code">{{ game.code }}</div>
-      {% if game.is_private and game.passcode %}
-      <div class="passcode-display">
-        Passcode: <span class="passcode-value">{{ game.passcode }}</span>
-      </div>
-      {% endif %}
-      <button class="copy-btn" id="copy-btn" title="Copy invite link">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-          <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-        </svg>
-        Copy Link
-      </button>
-      <div id="copy-feedback" class="copy-feedback hidden">Copied!</div>
-    </div>
 
-  </div>
+      <div class="lobby-panel">
+        <div class="section-title">ROUTE SCORING</div>
+        <div class="score-chips">
+          <div class="score-chip"><span>1</span><span>1 pt</span></div>
+          <div class="score-chip"><span>2</span><span>2 pts</span></div>
+          <div class="score-chip"><span>3</span><span>4 pts</span></div>
+          <div class="score-chip"><span>4</span><span>7 pts</span></div>
+          <div class="score-chip"><span>5</span><span>10 pts</span></div>
+          <div class="score-chip"><span>6</span><span>15 pts</span></div>
+        </div>
+      </div>
+
+    </div><!-- /lobby-right -->
+
+  </div><!-- /lobby-grid -->
 </div>
 {% endblock %}
 

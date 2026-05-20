@@ -49,8 +49,13 @@ from flask import (Flask, render_template, request, jsonify,
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
 from models import db, Game, Player, User, GameResult, Friendship
-from game_data import ROUTES, CITIES, DESTINATION_TICKETS, TICKET_BY_ID, PLAYER_COLORS, CARD_COLOR_HEX, BOARD_WIDTH, BOARD_HEIGHT
+from game_data_na import ROUTES, CITIES, DESTINATION_TICKETS, PLAYER_COLORS, CARD_COLOR_HEX, BOARD_WIDTH, BOARD_HEIGHT
+from game_data_europe import (
+    EUROPE_ROUTES, EUROPE_CITIES, EUROPE_DESTINATION_TICKETS,
+    EUROPE_BOARD_WIDTH, EUROPE_BOARD_HEIGHT,
+)
 from route_segments import ROUTE_SEGMENTS
+from route_segments_europe import EUROPE_ROUTE_SEGMENTS
 import game_logic as logic
 
 # ---------------------------------------------------------------------------
@@ -100,6 +105,7 @@ with app.app_context():
         "ALTER TABLE games ADD COLUMN is_private BOOLEAN DEFAULT 0",
         "ALTER TABLE games ADD COLUMN passcode VARCHAR(20)",
         "ALTER TABLE games ADD COLUMN last_activity_at DATETIME",
+        "ALTER TABLE games ADD COLUMN map_variant VARCHAR(10) DEFAULT 'usa'",
         "ALTER TABLE users ADD COLUMN phone VARCHAR(20)",
         "ALTER TABLE users ADD COLUMN notify_new_game BOOLEAN DEFAULT 0",
         "ALTER TABLE users ADD COLUMN elo INTEGER DEFAULT 1000",
@@ -653,17 +659,20 @@ def replay_page(code):
         replay_data = json_mod.loads(game.replay_json or "[]")
     except Exception:
         replay_data = []
-    board_data = {
-        "cities": {k: list(v) for k, v in CITIES.items()},
-        "routes": ROUTES,
-        "route_segments": ROUTE_SEGMENTS,
-        "card_colors": CARD_COLOR_HEX,
-        "board_w": BOARD_WIDTH,
-        "board_h": BOARD_HEIGHT,
-    }
+    _map = game.map_variant or "usa"
+    if _map == "europe":
+        _bd = {"map": "europe", "cities": {k: list(v) for k, v in EUROPE_CITIES.items()},
+               "routes": EUROPE_ROUTES, "route_segments": EUROPE_ROUTE_SEGMENTS,
+               "card_colors": CARD_COLOR_HEX,
+               "board_w": EUROPE_BOARD_WIDTH, "board_h": EUROPE_BOARD_HEIGHT}
+    else:
+        _bd = {"map": "usa", "cities": {k: list(v) for k, v in CITIES.items()},
+               "routes": ROUTES, "route_segments": ROUTE_SEGMENTS,
+               "card_colors": CARD_COLOR_HEX,
+               "board_w": BOARD_WIDTH, "board_h": BOARD_HEIGHT}
     players_info = {str(p.id): {"name": p.name, "color": p.color} for p in game.players}
     return render_template("replay.html", game=game, replay_data=replay_data,
-                           board_data=board_data, players_info=players_info,
+                           board_data=_bd, players_info=players_info,
                            user=get_current_user())
 
 
@@ -704,12 +713,16 @@ def create_game():
     max_players = int(data.get("max_players", 6))
     is_private = bool(data.get("is_private", False))
     passcode = data.get("passcode", "").strip() if is_private else None
+    map_variant = data.get("map_variant", "usa")
+    if map_variant not in ("usa", "europe"):
+        map_variant = "usa"
 
     sk = get_session_key()
     code = _make_game_code()
 
     game = Game(code=code, max_players=max(2, min(6, max_players)),
-                is_private=is_private, passcode=passcode or None)
+                is_private=is_private, passcode=passcode or None,
+                map_variant=map_variant)
     db.session.add(game)
     db.session.flush()
 
@@ -808,15 +821,29 @@ def game_page(code):
         else:
             return redirect(url_for("lobbies"))
 
-    board_data = {
-        "cities": {k: list(v) for k, v in CITIES.items()},
-        "routes": ROUTES,
-        "route_segments": ROUTE_SEGMENTS,
-        "card_colors": CARD_COLOR_HEX,
-        "board_w": BOARD_WIDTH,
-        "board_h": BOARD_HEIGHT,
-        "tickets": DESTINATION_TICKETS,
-    }
+    map_variant = game.map_variant or "usa"
+    if map_variant == "europe":
+        board_data = {
+            "map": "europe",
+            "cities": {k: list(v) for k, v in EUROPE_CITIES.items()},
+            "routes": EUROPE_ROUTES,
+            "route_segments": EUROPE_ROUTE_SEGMENTS,
+            "card_colors": CARD_COLOR_HEX,
+            "board_w": EUROPE_BOARD_WIDTH,
+            "board_h": EUROPE_BOARD_HEIGHT,
+            "tickets": EUROPE_DESTINATION_TICKETS,
+        }
+    else:
+        board_data = {
+            "map": "usa",
+            "cities": {k: list(v) for k, v in CITIES.items()},
+            "routes": ROUTES,
+            "route_segments": ROUTE_SEGMENTS,
+            "card_colors": CARD_COLOR_HEX,
+            "board_w": BOARD_WIDTH,
+            "board_h": BOARD_HEIGHT,
+            "tickets": DESTINATION_TICKETS,
+        }
     music_dir = os.path.join(app.static_folder, "music")
     music_files = sorted(
         f for f in os.listdir(music_dir) if f.lower().endswith(".mp3")
@@ -825,7 +852,8 @@ def game_page(code):
     return render_template("game.html", game=game, player=player,
                            board_data=board_data, music_files=music_files,
                            is_spectator=is_spectator, user=user, guest_name=guest_name,
-                           git_version_name=GIT_VERSION_NAME, git_commit_url=GIT_COMMIT_URL)
+                           git_version_name=GIT_VERSION_NAME, git_commit_url=GIT_COMMIT_URL,
+                           map_variant=map_variant)
 
 
 # ---------------------------------------------------------------------------
@@ -889,7 +917,7 @@ def on_start_game(data):
 
     players_data = [{"id": p.id, "name": p.name, "color": p.color, "turn_order": p.turn_order}
                     for p in players_list]
-    state = logic.init_game_state(players_data)
+    state = logic.init_game_state(players_data, map_variant=game.map_variant or "usa")
     game.state = state
     db.session.commit()
 
@@ -1012,7 +1040,8 @@ def on_rematch(data):
 
     new_code = _make_game_code()
     new_game = Game(code=new_code, status="waiting", max_players=game.max_players,
-                    is_private=game.is_private, passcode=game.passcode)
+                    is_private=game.is_private, passcode=game.passcode,
+                    map_variant=game.map_variant or "usa")
     db.session.add(new_game)
     db.session.flush()
 
@@ -1090,6 +1119,22 @@ def on_keep_drawn_tickets(data):
     code = data.get("code", "").upper()
     keep_ids = data.get("keep_ids", [])
     _player_action(code, lambda state, pid: logic.keep_drawn_tickets(state, pid, keep_ids))
+
+
+@socketio.on("resolve_tunnel")
+def on_resolve_tunnel(data):
+    code = data.get("code", "").upper()
+    proceed = bool(data.get("proceed", False))
+    extra_cards = data.get("extra_cards", {})
+    _player_action(code, lambda state, pid: logic.resolve_tunnel(state, pid, proceed, extra_cards))
+
+
+@socketio.on("place_station")
+def on_place_station(data):
+    code = data.get("code", "").upper()
+    city = data.get("city", "")
+    cards = data.get("cards", {})
+    _player_action(code, lambda state, pid: logic.place_station(state, pid, city, cards))
 
 
 @socketio.on("request_undo")
@@ -1349,10 +1394,14 @@ def _run_bots(game: Game, code: str):
             cur_pid = state["current_player_id"]
             cur_player = next((p for p in game.players if str(p.id) == cur_pid), None)
             if cur_player and cur_player.session_key.startswith("bot_"):
-                for _ in range(2):
-                    result = logic.draw_blind(state, cur_pid)
-                    if not result["ok"]:
-                        break
+                # If a tunnel is pending for this bot, abort it (bots don't pay extra)
+                if state.get("pending_tunnel") and state["pending_tunnel"].get("player_id") == cur_pid:
+                    logic.resolve_tunnel(state, cur_pid, proceed=False)
+                else:
+                    for _ in range(2):
+                        result = logic.draw_blind(state, cur_pid)
+                        if not result["ok"]:
+                            break
                 game.state = state
                 db.session.commit()
             else:
@@ -1370,8 +1419,13 @@ def on_register_session(data=None):
 
 
 @socketio.on("get_all_tickets")
-def on_get_all_tickets():
-    emit("all_tickets", DESTINATION_TICKETS)
+def on_get_all_tickets(data=None):
+    code = (data or {}).get("code", "").upper()
+    game = Game.query.filter_by(code=code).first() if code else None
+    if game and (game.map_variant or "usa") == "europe":
+        emit("all_tickets", EUROPE_DESTINATION_TICKETS)
+    else:
+        emit("all_tickets", DESTINATION_TICKETS)
 
 
 # ---------------------------------------------------------------------------

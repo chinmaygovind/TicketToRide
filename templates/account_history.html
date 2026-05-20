@@ -4,15 +4,8 @@
 {% block body %}
 <div class="lobbies-bg">
 
-  <div class="lobbies-header">
-    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
-    <div class="lobbies-user">
-      <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong></span>
-      <a href="/account" class="btn-logout">← ACCOUNT</a>
-      <a href="/lobbies" class="btn-logout">LOBBIES</a>
-      <a href="/logout" class="btn-logout">LOGOUT</a>
-    </div>
-  </div>
+  {% set active_page = 'account' %}
+  {% include '_nav.html' %}
 
   <div class="lobbies-body">
     <div class="lobbies-section-title">📋 MATCH HISTORY — {{ user.username }}</div>

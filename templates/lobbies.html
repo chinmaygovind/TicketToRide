@@ -4,27 +4,8 @@
 {% block body %}
 <div class="lobbies-bg">
 
-  <!-- Header -->
-  <div class="lobbies-header">
-    <div class="lobbies-logo">🚂 TICKET TO RIDE</div>
-    <div class="lobbies-user">
-      {% if user %}
-        <span class="lobbies-username">Playing as <strong>{{ user.username }}</strong> &nbsp;·&nbsp; Rating: <strong>{{ user.elo or 1000 }}</strong></span>
-        <button class="btn-notify {% if notify_new_game %}active{% endif %}"
-                id="notify-btn"
-                title="{% if notify_new_game %}Notifications on — click to turn off{% else %}Get notified when a new game starts{% endif %}">
-          {% if notify_new_game %}🔔{% else %}🔕{% endif %} Notify Me
-        </button>
-        <a href="/account" class="btn-logout">ACCOUNT</a>
-        <a href="/leaderboard" class="btn-logout">LEADERBOARD</a>
-        <a href="/logout" class="btn-logout">LOGOUT</a>
-      {% else %}
-        <span class="lobbies-username">Playing as <strong>{{ guest_name }}</strong> <span class="guest-badge">GUEST</span></span>
-        <a href="/login?register=1" class="btn-create-account">Create Account</a>
-        <a href="/logout" class="btn-logout">EXIT</a>
-      {% endif %}
-    </div>
-  </div>
+  {% set active_page = 'lobbies' %}
+  {% include '_nav.html' %}
 
   <!-- Body -->
   <div class="lobbies-body">
@@ -60,6 +41,7 @@
             </div>
             <div class="lobby-card-meta">
               {{ game.players | length }} / {{ game.max_players }} players &nbsp;·&nbsp; Waiting to start
+              &nbsp;·&nbsp; {% if game.map_variant == 'europe' %}🌍 Europe{% else %}🗺 North America{% endif %}
             </div>
           </div>
           <span class="lobby-card-badge badge-public">PUBLIC</span>
@@ -112,6 +94,20 @@
         <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
         {% endfor %}
       </div>
+    </div>
+
+    <div style="margin-bottom:1.2rem;">
+      <div class="create-field-label">MAP</div>
+      <div class="visibility-toggle">
+        <button class="vis-btn active" id="map-usa">🗺 North America</button>
+        <button class="vis-btn" id="map-europe">🌍 Europe</button>
+      </div>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.4rem;" id="map-desc-usa">
+        The classic 36-city North America map.
+      </p>
+      <p style="font-size:0.78rem;color:var(--text-muted);margin-top:0.4rem;display:none;" id="map-desc-europe">
+        47-city Europe map with tunnels, ferries, and train stations.
+      </p>
     </div>
 
     <div style="margin-bottom:1rem;">
@@ -170,6 +166,7 @@
 <script>
 let selectedMaxPlayers = 4;
 let isPrivate = false;
+let selectedMap = 'usa';
 let pendingJoinCode = null;
 
 // Max players selector
@@ -180,6 +177,18 @@ document.querySelectorAll('.count-btn').forEach(btn => {
     selectedMaxPlayers = parseInt(btn.dataset.count);
   });
 });
+
+// Map selection
+document.getElementById('map-usa').addEventListener('click', () => setMap('usa'));
+document.getElementById('map-europe').addEventListener('click', () => setMap('europe'));
+
+function setMap(map) {
+  selectedMap = map;
+  document.getElementById('map-usa').classList.toggle('active', map === 'usa');
+  document.getElementById('map-europe').classList.toggle('active', map === 'europe');
+  document.getElementById('map-desc-usa').style.display = map === 'usa' ? '' : 'none';
+  document.getElementById('map-desc-europe').style.display = map === 'europe' ? '' : 'none';
+}
 
 // Visibility toggle
 document.getElementById('vis-public').addEventListener('click', () => setVisibility(false));
@@ -222,7 +231,7 @@ document.getElementById('create-confirm-btn').addEventListener('click', async ()
   const res = await fetch('/create', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ max_players: selectedMaxPlayers, is_private: isPrivate, passcode })
+    body: JSON.stringify({ max_players: selectedMaxPlayers, is_private: isPrivate, passcode, map_variant: selectedMap })
   });
   const data = await res.json();
   if (data.ok) {

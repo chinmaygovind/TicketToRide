@@ -1,0 +1,777 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Europe Board Editor — Ticket to Ride</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background:#0a0a0a; color:#e0d8c8; font-family:'Courier New',monospace; height:100vh; display:flex; flex-direction:column; overflow:hidden; user-select:none; }
+    header { background:#1a1410; border-bottom:1px solid #3d3528; padding:0.4rem 0.8rem; display:flex; align-items:center; gap:0.7rem; flex-shrink:0; }
+    header h1 { font-size:0.85rem; color:#c8a84b; font-family:'Cinzel',serif; white-space:nowrap; }
+    .mode-btns { display:flex; gap:0.3rem; }
+    .mode-btn { padding:0.25rem 0.7rem; border:1px solid #3d3528; background:#1a1610; color:#a09070; font-family:monospace; font-size:0.68rem; cursor:pointer; border-radius:4px; }
+    .mode-btn.active { background:#c8a84b; color:#000; border-color:#c8a84b; font-weight:bold; }
+    .hint { font-size:0.62rem; color:#4a4038; margin-left:auto; }
+    .kbd { background:#2a2218; border:1px solid #3d3528; border-bottom-width:2px; border-radius:3px; padding:0.03rem 0.28rem; font-size:0.6rem; color:#c8a84b; }
+    #main { display:flex; flex:1; overflow:hidden; }
+    #board-wrap { flex:1; display:flex; align-items:center; justify-content:center; background:#0d0d0d; overflow:auto; position:relative; }
+    #board-aspect { position:relative; flex-shrink:0; }
+    #board-img { display:block; }
+    #overlay-svg { position:absolute; top:0; left:0; width:100%; height:100%; overflow:visible; }
+    #sidebar { width:300px; background:#14110e; border-left:1px solid #3d3528; display:flex; flex-direction:column; overflow:hidden; flex-shrink:0; }
+    #sidebar-top { padding:0.6rem; border-bottom:1px solid #3d3528; display:flex; flex-direction:column; gap:0.4rem; flex-shrink:0; }
+    #sidebar-top h2 { font-size:0.7rem; color:#c8a84b; font-family:'Cinzel',serif; letter-spacing:0.08em; }
+    .btn-row { display:flex; gap:0.35rem; flex-wrap:wrap; }
+    .btn { padding:0.28rem 0.55rem; border:1px solid #3d3528; background:#1a1610; color:#c8a84b; font-family:monospace; font-size:0.67rem; cursor:pointer; border-radius:4px; white-space:nowrap; }
+    .btn:hover { background:#2a2218; border-color:#c8a84b; }
+    .btn-primary { background:linear-gradient(135deg,#c8a84b,#a8822b); color:#000; border-color:#c8a84b; font-weight:bold; }
+    .btn-primary:hover { background:linear-gradient(135deg,#e8c97a,#c8a84b); }
+    #active-info { background:#0a0806; border:1px solid #2a2218; border-radius:4px; padding:0.3rem 0.5rem; font-size:0.68rem; color:#6a6050; min-height:2rem; }
+    #list-container { flex:1; overflow-y:auto; }
+    .list-row { padding:0.26rem 0.65rem; border-bottom:1px solid #191511; display:flex; align-items:center; gap:0.3rem; font-size:0.68rem; cursor:pointer; }
+    .list-row:hover { background:#1c1814; }
+    .list-row.active { background:#231d14; }
+    .list-row.active .row-name { color:#c8a84b; }
+    .list-row.done { opacity:0.5; }
+    .list-row.done .row-name { text-decoration:line-through; }
+    .row-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:0.67rem; }
+    .row-badge { font-size:0.58rem; color:#4a4038; padding:0.1rem 0.3rem; border:1px solid #2a2218; border-radius:3px; }
+    .row-badge.tunnel { color:#c8a84b; border-color:#c8a84b55; }
+    .row-badge.ferry { color:#3b82f6; border-color:#3b82f655; }
+    #output-section { border-top:1px solid #3d3528; padding:0.4rem; background:#0f0c09; flex-shrink:0; }
+    #output-label { font-size:0.58rem; color:#4a4038; margin-bottom:0.25rem; }
+    #output { background:#0a0806; border:1px solid #2a2218; border-radius:3px; padding:0.3rem; font-size:0.56rem; color:#6a6050; white-space:pre; max-height:100px; overflow:auto; font-family:monospace; line-height:1.5; }
+    ::-webkit-scrollbar { width:4px; }
+    ::-webkit-scrollbar-track { background:transparent; }
+    ::-webkit-scrollbar-thumb { background:#3d3528; border-radius:2px; }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Europe Board Editor</h1>
+  <div class="mode-btns">
+    <button class="mode-btn active" id="btn-mode-cities" onclick="setMode('cities')">1 Cities</button>
+    <button class="mode-btn" id="btn-mode-labels" onclick="setMode('labels')">2 Labels</button>
+    <button class="mode-btn" id="btn-mode-segs" onclick="setMode('segs')">3 Segments</button>
+  </div>
+  <span class="hint" id="mode-hint">Drag city dots to reposition · Click board = add new city</span>
+</header>
+
+<div id="main">
+  <div id="board-wrap">
+    <div id="board-aspect">
+      <img id="board-img" src="../assets/europe_board.png" alt="Europe Board" draggable="false"/>
+      <svg id="overlay-svg" viewBox="0 0 1024 681" xmlns="http://www.w3.org/2000/svg">
+        <g id="routes-layer"></g>
+        <g id="segs-layer"></g>
+        <g id="cities-layer"></g>
+        <g id="labels-layer"></g>
+        <g id="click-pts-layer"></g>
+      </svg>
+    </div>
+  </div>
+
+  <div id="sidebar">
+    <div id="sidebar-top">
+      <h2 id="sidebar-title">Cities</h2>
+      <div id="active-info">Click a city or drag to reposition.</div>
+      <div class="btn-row" id="action-row">
+        <button class="btn" onclick="deleteSelectedCity()">✕ Delete</button>
+        <button class="btn btn-primary" onclick="exportAll()">⎘ Export All</button>
+      </div>
+    </div>
+    <div id="list-container">
+      <div id="item-list"></div>
+    </div>
+    <div id="output-section">
+      <div id="output-label">OUTPUT — copy and paste into code files:</div>
+      <div id="output"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Data ─────────────────────────────────────────────────────────────────────
+
+const BOARD_W = 1024, BOARD_H = 681;
+
+// City positions (x, y) in 1024×681 space — from game_data_europe.py
+let cities = {
+  "Edinburgh":      [170,  62], "London":         [232, 207],
+  "Amsterdam":      [326, 210], "Bruxelles":      [305, 258],
+  "Dieppe":         [225, 295], "Brest":          [134, 323],
+  "Paris":          [272, 337], "Pamplona":       [210, 489],
+  "Madrid":         [113, 568], "Lisboa":         [ 47, 587],
+  "Cadiz":          [112, 638], "Barcelona":      [220, 578],
+  "Marseille":      [358, 483], "Essen":          [407, 219],
+  "Kobenhavn":      [477, 117], "Frankfurt":      [392, 288],
+  "Zurich":         [384, 393], "Munchen":        [448, 330],
+  "Berlin":         [503, 233], "Wien":           [557, 347],
+  "Venezia":        [464, 424], "Roma":           [473, 512],
+  "Brindisi":       [556, 537], "Palermo":        [508, 640],
+  "Stockholm":      [577,  41], "Danzic":         [615, 157],
+  "Warszawa":       [661, 225], "Riga":           [695,  70],
+  "Petrograd":      [860,  64], "Wilno":          [771, 200],
+  "Smolensk":       [870, 206], "Moskva":         [952, 182],
+  "Kharkov":        [940, 327], "Budapest":       [606, 370],
+  "Zagreb":         [546, 436], "Sarajevo":       [628, 492],
+  "Bucuresti":      [754, 439], "Sofia":          [693, 501],
+  "Kyiv":           [810, 277], "Sevastopol":     [887, 452],
+  "Rostov":         [980, 381], "Sochi":          [975, 468],
+  "Athina":         [677, 613], "Constantinople": [802, 561],
+  "Smyrna":         [759, 639], "Angora":         [877, 612],
+  "Erzurum":        [956, 589],
+};
+
+// Label offsets (dx, dy from city dot)
+let labelOffsets = {
+  "Edinburgh": [-10, -18], "London": [-38, -3],   "Amsterdam": [-38, -20],
+  "Bruxelles": [-29, -23], "Dieppe": [-19, 8],    "Brest": [-20, -6],
+  "Paris": [-45, 6],       "Pamplona": [-43, -21],"Madrid": [-29, -2],
+  "Lisboa": [28, -4],      "Cadiz": [0, -21],     "Barcelona": [-2, 9],
+  "Marseille": [8, 15],    "Essen": [-10, 9],     "Kobenhavn": [36, 7],
+  "Frankfurt": [43, 10],   "Zurich": [-20, -19],  "Munchen": [33, -9],
+  "Berlin": [-24, -31],    "Wien": [-29, -14],    "Venezia": [34, 6],
+  "Roma": [-24, 4],        "Brindisi": [22, -21], "Palermo": [-34, -5],
+  "Stockholm": [-56, -11], "Danzic": [-18, 9],    "Warszawa": [43, 0],
+  "Riga": [25, 9],         "Petrograd": [32, -15],"Wilno": [0, 14],
+  "Smolensk": [-32, 4],    "Moskva": [-29, -11],  "Kharkov": [-28, -14],
+  "Budapest": [39, -14],   "Zagreb": [32, 2],     "Sarajevo": [-37, -19],
+  "Bucuresti": [40, 0],    "Sofia": [0, 14],      "Kyiv": [26, -15],
+  "Sevastopol": [-41, -2], "Rostov": [-32, 5],    "Sochi": [-30, 7],
+  "Athina": [25, -18],     "Constantinople": [54, -8], "Smyrna": [33, -15],
+  "Angora": [-36, -2],     "Erzurum": [-32, 4],
+};
+// Fill any missing cities with default
+Object.keys(cities).forEach(name => { if (!labelOffsets[name]) labelOffsets[name] = [0, 14]; });
+
+// Routes from game_data_europe.py
+const ROUTES = [
+  {id:101,city1:"Edinburgh",   city2:"London",        length:4,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:102,city1:"Edinburgh",   city2:"London",        length:4,color:"black", side:1,tunnel:false,ferry:0},
+  {id:103,city1:"London",      city2:"Amsterdam",     length:2,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:104,city1:"London",      city2:"Dieppe",        length:2,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:205,city1:"London",      city2:"Dieppe",        length:2,color:"gray",  side:1,tunnel:false,ferry:1},
+  {id:105,city1:"Amsterdam",   city2:"Bruxelles",     length:1,color:"black", side:0,tunnel:false,ferry:0},
+  {id:106,city1:"Amsterdam",   city2:"Frankfurt",     length:2,color:"white", side:0,tunnel:false,ferry:0},
+  {id:107,city1:"Amsterdam",   city2:"Essen",         length:3,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:206,city1:"Dieppe",      city2:"Brest",         length:2,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:207,city1:"Dieppe",      city2:"Bruxelles",     length:2,color:"green", side:0,tunnel:false,ferry:0},
+  {id:109,city1:"Bruxelles",   city2:"Frankfurt",     length:2,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:111,city1:"Bruxelles",   city2:"Paris",         length:2,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:112,city1:"Bruxelles",   city2:"Paris",         length:2,color:"yellow",side:1,tunnel:false,ferry:0},
+  {id:113,city1:"Dieppe",      city2:"Paris",         length:1,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:114,city1:"Essen",       city2:"Berlin",        length:2,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:115,city1:"Essen",       city2:"Frankfurt",     length:2,color:"green", side:0,tunnel:false,ferry:0},
+  {id:117,city1:"Essen",       city2:"Kobenhavn",     length:3,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:118,city1:"Essen",       city2:"Kobenhavn",     length:3,color:"gray",  side:1,tunnel:false,ferry:1},
+  {id:119,city1:"Frankfurt",   city2:"Berlin",        length:3,color:"black", side:0,tunnel:false,ferry:0},
+  {id:120,city1:"Frankfurt",   city2:"Berlin",        length:3,color:"red",   side:1,tunnel:false,ferry:0},
+  {id:121,city1:"Frankfurt",   city2:"Munchen",       length:2,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:122,city1:"Brest",       city2:"Paris",         length:3,color:"black", side:0,tunnel:false,ferry:0},
+  {id:123,city1:"Brest",       city2:"Pamplona",      length:4,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:125,city1:"Paris",       city2:"Frankfurt",     length:3,color:"white", side:0,tunnel:false,ferry:0},
+  {id:126,city1:"Paris",       city2:"Frankfurt",     length:3,color:"orange",side:1,tunnel:false,ferry:0},
+  {id:127,city1:"Paris",       city2:"Zurich",        length:3,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:128,city1:"Paris",       city2:"Marseille",     length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:129,city1:"Paris",       city2:"Pamplona",      length:4,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:208,city1:"Paris",       city2:"Pamplona",      length:4,color:"green", side:1,tunnel:false,ferry:0},
+  {id:130,city1:"Pamplona",    city2:"Madrid",        length:3,color:"white", side:0,tunnel:true, ferry:0},
+  {id:131,city1:"Pamplona",    city2:"Madrid",        length:3,color:"black", side:1,tunnel:true, ferry:0},
+  {id:132,city1:"Pamplona",    city2:"Barcelona",     length:2,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:133,city1:"Madrid",      city2:"Lisboa",        length:3,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:134,city1:"Madrid",      city2:"Cadiz",         length:3,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:135,city1:"Madrid",      city2:"Barcelona",     length:2,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:136,city1:"Lisboa",      city2:"Cadiz",         length:2,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:137,city1:"Barcelona",   city2:"Marseille",     length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:209,city1:"Marseille",   city2:"Pamplona",      length:4,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:138,city1:"Marseille",   city2:"Zurich",        length:2,color:"pink",  side:0,tunnel:true, ferry:0},
+  {id:140,city1:"Zurich",      city2:"Munchen",       length:2,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:141,city1:"Zurich",      city2:"Venezia",       length:2,color:"green", side:0,tunnel:true, ferry:0},
+  {id:142,city1:"Munchen",     city2:"Venezia",       length:2,color:"blue",  side:0,tunnel:true, ferry:0},
+  {id:143,city1:"Munchen",     city2:"Wien",          length:3,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:210,city1:"Marseille",   city2:"Roma",          length:4,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:145,city1:"Wien",        city2:"Budapest",      length:1,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:146,city1:"Wien",        city2:"Budapest",      length:1,color:"white", side:1,tunnel:false,ferry:0},
+  {id:147,city1:"Wien",        city2:"Zagreb",        length:2,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:148,city1:"Wien",        city2:"Warszawa",      length:4,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:211,city1:"Wien",        city2:"Berlin",        length:3,color:"green", side:0,tunnel:false,ferry:0},
+  {id:150,city1:"Budapest",    city2:"Zagreb",        length:2,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:151,city1:"Budapest",    city2:"Sarajevo",      length:3,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:152,city1:"Budapest",    city2:"Bucuresti",     length:4,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:212,city1:"Kyiv",        city2:"Budapest",      length:6,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:154,city1:"Zagreb",      city2:"Venezia",       length:2,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:155,city1:"Zagreb",      city2:"Sarajevo",      length:3,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:156,city1:"Venezia",     city2:"Roma",          length:2,color:"black", side:0,tunnel:false,ferry:0},
+  {id:158,city1:"Roma",        city2:"Brindisi",      length:2,color:"white", side:0,tunnel:false,ferry:0},
+  {id:159,city1:"Roma",        city2:"Palermo",       length:4,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:160,city1:"Brindisi",    city2:"Palermo",       length:3,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:161,city1:"Brindisi",    city2:"Athina",        length:4,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:213,city1:"Athina",      city2:"Sarajevo",      length:4,color:"green", side:0,tunnel:false,ferry:0},
+  {id:163,city1:"Kobenhavn",   city2:"Stockholm",     length:3,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:164,city1:"Kobenhavn",   city2:"Stockholm",     length:3,color:"white", side:1,tunnel:false,ferry:0},
+  {id:165,city1:"Stockholm",   city2:"Petrograd",     length:8,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:167,city1:"Berlin",      city2:"Danzic",        length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:168,city1:"Berlin",      city2:"Warszawa",      length:4,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:169,city1:"Berlin",      city2:"Warszawa",      length:4,color:"yellow",side:1,tunnel:false,ferry:0},
+  {id:170,city1:"Danzic",      city2:"Riga",          length:3,color:"black", side:0,tunnel:false,ferry:0},
+  {id:171,city1:"Danzic",      city2:"Warszawa",      length:2,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:172,city1:"Riga",        city2:"Petrograd",     length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:173,city1:"Riga",        city2:"Wilno",         length:4,color:"green", side:0,tunnel:false,ferry:0},
+  {id:174,city1:"Petrograd",   city2:"Wilno",         length:4,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:175,city1:"Petrograd",   city2:"Moskva",        length:4,color:"white", side:0,tunnel:false,ferry:0},
+  {id:177,city1:"Warszawa",    city2:"Wilno",         length:3,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:214,city1:"Warszawa",    city2:"Kyiv",          length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:179,city1:"Wilno",       city2:"Smolensk",      length:3,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:180,city1:"Wilno",       city2:"Kyiv",          length:2,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:182,city1:"Smolensk",    city2:"Moskva",        length:2,color:"orange",side:0,tunnel:false,ferry:0},
+  {id:183,city1:"Moskva",      city2:"Kharkov",       length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:184,city1:"Kyiv",        city2:"Kharkov",       length:4,color:"gray",  side:0,tunnel:false,ferry:0},
+  {id:186,city1:"Kyiv",        city2:"Smolensk",      length:3,color:"red",   side:0,tunnel:false,ferry:0},
+  {id:187,city1:"Kharkov",     city2:"Rostov",        length:2,color:"green", side:0,tunnel:false,ferry:0},
+  {id:188,city1:"Sarajevo",    city2:"Sofia",         length:2,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:189,city1:"Bucuresti",   city2:"Sofia",         length:2,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:190,city1:"Bucuresti",   city2:"Constantinople",length:3,color:"yellow",side:0,tunnel:false,ferry:0},
+  {id:191,city1:"Bucuresti",   city2:"Sevastopol",    length:4,color:"white", side:0,tunnel:false,ferry:0},
+  {id:192,city1:"Sevastopol",  city2:"Constantinople",length:4,color:"gray",  side:0,tunnel:false,ferry:2},
+  {id:196,city1:"Sofia",       city2:"Constantinople",length:3,color:"blue",  side:0,tunnel:false,ferry:0},
+  {id:197,city1:"Sofia",       city2:"Athina",        length:3,color:"pink",  side:0,tunnel:false,ferry:0},
+  {id:199,city1:"Constantinople",city2:"Smyrna",      length:2,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:200,city1:"Constantinople",city2:"Angora",      length:2,color:"gray",  side:0,tunnel:true, ferry:0},
+  {id:201,city1:"Smyrna",      city2:"Angora",        length:3,color:"orange",side:0,tunnel:true, ferry:0},
+  {id:202,city1:"Angora",      city2:"Erzurum",       length:3,color:"black", side:0,tunnel:false,ferry:0},
+  {id:203,city1:"Erzurum",     city2:"Sochi",         length:3,color:"red",   side:0,tunnel:true, ferry:0},
+  {id:215,city1:"Sochi",       city2:"Sevastopol",    length:2,color:"gray",  side:0,tunnel:false,ferry:1},
+  {id:216,city1:"Erzurum",     city2:"Sevastopol",    length:4,color:"gray",  side:0,tunnel:false,ferry:2},
+  {id:217,city1:"Smyrna",      city2:"Palermo",       length:6,color:"gray",  side:0,tunnel:false,ferry:2},
+];
+
+// Segment data: { routeId: [[cx,cy,angle], ...] }
+let routeSegments = {};
+
+// ─── Mode ─────────────────────────────────────────────────────────────────────
+let mode = 'cities';
+let selectedCity = null;
+let selectedRoute = null;
+let segClickBuf = [];  // corner clicks buffer for current segment car
+let segCarIdx = 0;     // which car we're currently collecting for
+
+const COLOR_MAP = {
+  red:'#EF4444',blue:'#3B82F6',green:'#22C55E',yellow:'#EAB308',
+  orange:'#F97316',purple:'#8B5CF6',black:'#6B7280',white:'#CBD5E1',
+  pink:'#EC4899',gray:'#9CA3AF',
+};
+
+// ─── Scale tracking ───────────────────────────────────────────────────────────
+let scale = 1; // board display scale
+
+function onImgLoad() {
+  const img = document.getElementById('board-img');
+  const wrap = document.getElementById('board-wrap');
+  const maxW = wrap.clientWidth - 20;
+  const maxH = wrap.clientHeight - 20;
+  const s = Math.min(maxW / img.naturalWidth, maxH / img.naturalHeight, 1);
+  scale = s;
+  img.style.width  = Math.round(img.naturalWidth  * s) + 'px';
+  img.style.height = Math.round(img.naturalHeight * s) + 'px';
+  const aspect = document.getElementById('board-aspect');
+  aspect.style.width  = img.style.width;
+  aspect.style.height = img.style.height;
+  render();
+}
+
+// SVG coords from mouse event on the SVG
+function svgPt(e) {
+  const svg = document.getElementById('overlay-svg');
+  const rect = svg.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width  * BOARD_W;
+  const y = (e.clientY - rect.top)  / rect.height * BOARD_H;
+  return [Math.round(x * 10) / 10, Math.round(y * 10) / 10];
+}
+
+// ─── Mode switching ───────────────────────────────────────────────────────────
+function setMode(m) {
+  mode = m;
+  segClickBuf = []; segCarIdx = 0;
+  ['cities','labels','segs'].forEach(id => {
+    document.getElementById('btn-mode-' + id).classList.toggle('active', id === m);
+  });
+  const hints = {
+    cities: 'Drag city dots to reposition · Click empty area = add new city · Del = delete selected',
+    labels: 'Drag label text to reposition · Arrow keys = nudge 1px · Shift+Arrow = 5px',
+    segs:   'A/D = prev/next route · R = redo current · click 4 corners per car (TL→TR→BR→BL) · Esc = cancel',
+  };
+  const titles = { cities:'Cities', labels:'Labels', segs:'Route Segments' };
+  document.getElementById('mode-hint').textContent = hints[m];
+  document.getElementById('sidebar-title').textContent = titles[m];
+  selectedCity = null;
+  selectedRoute = null;
+  render();
+  buildList();
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────────
+function render() {
+  renderRoutes();
+  renderCities();
+  renderLabels();
+  renderSegClickBuf();
+}
+
+function ns(tag) { return document.createElementNS('http://www.w3.org/2000/svg', tag); }
+
+function renderRoutes() {
+  const layer = document.getElementById('routes-layer');
+  layer.innerHTML = '';
+  const segsLayer = document.getElementById('segs-layer');
+  segsLayer.innerHTML = '';
+
+  for (const route of ROUTES) {
+    const c1 = cities[route.city1], c2 = cities[route.city2];
+    if (!c1 || !c2) continue;
+    const color = COLOR_MAP[route.color] || '#888';
+    const isSelected = selectedRoute && selectedRoute.id === route.id;
+
+    // Thin line between cities
+    const line = ns('line');
+    line.setAttribute('x1', c1[0]); line.setAttribute('y1', c1[1]);
+    line.setAttribute('x2', c2[0]); line.setAttribute('y2', c2[1]);
+    line.setAttribute('stroke', isSelected ? '#f59e0b' : (color + '55'));
+    line.setAttribute('stroke-width', isSelected ? 1.5 : 0.7);
+    layer.appendChild(line);
+
+    // Render stored segments if any
+    const segs = routeSegments[route.id];
+    if (segs) {
+      for (const [cx, cy, ang] of segs) {
+        const segW = 30;
+        const r = ns('rect');
+        r.setAttribute('x', cx - segW/2); r.setAttribute('y', cy - 4);
+        r.setAttribute('width', segW); r.setAttribute('height', 8);
+        r.setAttribute('transform', `rotate(${ang},${cx},${cy})`);
+        r.setAttribute('rx', 1.5);
+        r.setAttribute('fill', color);
+        r.setAttribute('fill-opacity', isSelected ? '0.9' : '0.6');
+        r.setAttribute('stroke', 'rgba(255,255,255,0.4)'); r.setAttribute('stroke-width', '0.8');
+        r.setAttribute('pointer-events', 'none');
+        segsLayer.appendChild(r);
+      }
+    }
+  }
+}
+
+function renderCities() {
+  const layer = document.getElementById('cities-layer');
+  layer.innerHTML = '';
+  for (const [name, pos] of Object.entries(cities)) {
+    const g = ns('g');
+    g.style.cursor = mode === 'cities' ? 'grab' : 'default';
+    g.dataset.city = name;
+
+    const circle = ns('circle');
+    circle.setAttribute('cx', pos[0]); circle.setAttribute('cy', pos[1]);
+    circle.setAttribute('r', name === selectedCity ? 7 : 5);
+    circle.setAttribute('fill', name === selectedCity ? '#c8a84b' : '#1a1512');
+    circle.setAttribute('stroke', '#c8a84b'); circle.setAttribute('stroke-width', 1.5);
+    g.appendChild(circle);
+    layer.appendChild(g);
+
+    if (mode === 'cities') makeCityDraggable(g, name);
+    if (mode === 'segs') {
+      g.style.cursor = 'default';
+      // Highlight endpoints of selected route
+      if (selectedRoute && (selectedRoute.city1 === name || selectedRoute.city2 === name)) {
+        circle.setAttribute('r', 7);
+        circle.setAttribute('fill', '#f59e0b');
+      }
+    }
+  }
+}
+
+function renderLabels() {
+  const layer = document.getElementById('labels-layer');
+  layer.innerHTML = '';
+  for (const [name, pos] of Object.entries(cities)) {
+    const [dx, dy] = labelOffsets[name] || [0, 14];
+    const lx = pos[0] + dx, ly = pos[1] + dy;
+
+    const bg = ns('rect');
+    const estW = name.length * 5.8;
+    bg.setAttribute('x', lx - estW/2 - 2); bg.setAttribute('y', ly - 1);
+    bg.setAttribute('width', estW + 4); bg.setAttribute('height', 11);
+    bg.setAttribute('fill', 'rgba(10,7,4,0.55)'); bg.setAttribute('rx', 2);
+    bg.setAttribute('pointer-events', 'none');
+    layer.appendChild(bg);
+
+    const txt = ns('text');
+    txt.setAttribute('x', lx); txt.setAttribute('y', ly);
+    txt.setAttribute('font-size', '9');
+    txt.setAttribute('fill', name === selectedCity ? '#c8a84b' : '#f0e8d0');
+    txt.setAttribute('stroke', '#1a1210'); txt.setAttribute('stroke-width', '1.5');
+    txt.setAttribute('paint-order', 'stroke');
+    txt.setAttribute('text-anchor', 'middle');
+    txt.setAttribute('dominant-baseline', 'hanging');
+    txt.style.fontFamily = 'Cinzel, serif';
+    txt.style.cursor = mode === 'labels' ? 'grab' : 'default';
+    txt.dataset.city = name;
+    txt.textContent = name;
+    layer.appendChild(txt);
+
+    if (mode === 'labels') makeLabelDraggable(txt, name, pos);
+  }
+}
+
+function renderSegClickBuf() {
+  const layer = document.getElementById('click-pts-layer');
+  layer.innerHTML = '';
+  for (const [px, py] of segClickBuf) {
+    const c = ns('circle');
+    c.setAttribute('cx', px); c.setAttribute('cy', py);
+    c.setAttribute('r', 4); c.setAttribute('fill', '#f59e0b');
+    c.setAttribute('stroke', '#000'); c.setAttribute('stroke-width', 1);
+    c.setAttribute('pointer-events', 'none');
+    layer.appendChild(c);
+  }
+}
+
+// ─── City dragging ────────────────────────────────────────────────────────────
+function makeCityDraggable(el, name) {
+  el.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    selectedCity = name;
+    const svg = document.getElementById('overlay-svg');
+    let startPt = svgPt(e);
+    let startPos = [...cities[name]];
+
+    function onMove(me) {
+      const pt = svgPt(me);
+      cities[name] = [
+        Math.max(0, Math.min(BOARD_W, startPos[0] + pt[0] - startPt[0])),
+        Math.max(0, Math.min(BOARD_H, startPos[1] + pt[1] - startPt[1])),
+      ];
+      cities[name] = [Math.round(cities[name][0]), Math.round(cities[name][1])];
+      render();
+      updateActiveInfo();
+    }
+    function onUp() {
+      svg.removeEventListener('mousemove', onMove);
+      svg.removeEventListener('mouseup', onUp);
+      buildList();
+    }
+    svg.addEventListener('mousemove', onMove);
+    svg.addEventListener('mouseup', onUp);
+    render(); updateActiveInfo();
+  });
+}
+
+// ─── Label dragging ───────────────────────────────────────────────────────────
+function makeLabelDraggable(el, name, basePos) {
+  el.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    selectedCity = name;
+    const svg = document.getElementById('overlay-svg');
+    const startPt = svgPt(e);
+    const startOff = [...(labelOffsets[name] || [0, 14])];
+
+    function onMove(me) {
+      const pt = svgPt(me);
+      labelOffsets[name] = [
+        Math.round(startOff[0] + pt[0] - startPt[0]),
+        Math.round(startOff[1] + pt[1] - startPt[1]),
+      ];
+      render(); updateActiveInfo();
+    }
+    function onUp() {
+      svg.removeEventListener('mousemove', onMove);
+      svg.removeEventListener('mouseup', onUp);
+    }
+    svg.addEventListener('mousemove', onMove);
+    svg.addEventListener('mouseup', onUp);
+    render(); updateActiveInfo();
+  });
+}
+
+// ─── Board click (add city / segment click) ───────────────────────────────────
+document.getElementById('overlay-svg').addEventListener('mousedown', e => {
+  if (e.target.closest('#cities-layer g') || e.target.closest('#labels-layer text')) return;
+  const pt = svgPt(e);
+
+  if (mode === 'cities') {
+    // Click empty = add city
+    const name = prompt('City name:');
+    if (!name || !name.trim()) return;
+    cities[name.trim()] = [Math.round(pt[0]), Math.round(pt[1])];
+    labelOffsets[name.trim()] = [0, 14];
+    selectedCity = name.trim();
+    render(); buildList();
+  } else if (mode === 'segs' && selectedRoute) {
+    // Collect corner clicks for current car
+    segClickBuf.push(pt);
+    renderSegClickBuf();
+    if (segClickBuf.length === 4) {
+      // Compute center and angle from 4 corners
+      const cx = segClickBuf.reduce((s, p) => s + p[0], 0) / 4;
+      const cy = segClickBuf.reduce((s, p) => s + p[1], 0) / 4;
+      // Angle from midpoint of corners 0+1 → midpoint of corners 2+3
+      const mx1 = (segClickBuf[0][0] + segClickBuf[1][0]) / 2;
+      const my1 = (segClickBuf[0][1] + segClickBuf[1][1]) / 2;
+      const mx2 = (segClickBuf[2][0] + segClickBuf[3][0]) / 2;
+      const my2 = (segClickBuf[2][1] + segClickBuf[3][1]) / 2;
+      const angle = Math.atan2(my2 - my1, mx2 - mx1) * 180 / Math.PI;
+
+      if (!routeSegments[selectedRoute.id]) routeSegments[selectedRoute.id] = [];
+      routeSegments[selectedRoute.id][segCarIdx] = [
+        Math.round(cx * 10) / 10,
+        Math.round(cy * 10) / 10,
+        Math.round(angle * 10) / 10,
+      ];
+      segCarIdx++;
+      segClickBuf = [];
+
+      const isDone = segCarIdx >= selectedRoute.length;
+      if (isDone) {
+        updateActiveInfo(`✓ Route ${selectedRoute.id} complete (${selectedRoute.length} cars done).`);
+        buildList();
+      } else {
+        updateActiveInfo(`Car ${segCarIdx}/${selectedRoute.length} recorded. Click 4 corners of car ${segCarIdx + 1}.`);
+      }
+      render();
+    } else {
+      updateActiveInfo(`Corner ${segClickBuf.length}/4 for car ${segCarIdx + 1}/${selectedRoute.length} (click remaining corners)`);
+    }
+  }
+});
+
+// ─── Sidebar list ──────────────────────────────────────────────────────────────
+function buildList() {
+  const el = document.getElementById('item-list');
+  if (mode === 'cities') {
+    el.innerHTML = Object.keys(cities).map(name => {
+      const pos = cities[name];
+      return `<div class="list-row ${name === selectedCity ? 'active' : ''}" onclick="selectCity('${name.replace(/'/g,"\\'")}')">
+        <span class="row-name">${name}</span>
+        <span class="row-badge">${pos[0]},${pos[1]}</span>
+      </div>`;
+    }).join('');
+  } else if (mode === 'labels') {
+    el.innerHTML = Object.keys(cities).map(name => {
+      const [dx, dy] = labelOffsets[name] || [0,14];
+      return `<div class="list-row ${name === selectedCity ? 'active' : ''}" onclick="selectCity('${name.replace(/'/g,"\\'")}')">
+        <span class="row-name">${name}</span>
+        <span class="row-badge">${dx},${dy}</span>
+      </div>`;
+    }).join('');
+  } else {
+    el.innerHTML = ROUTES.map(r => {
+      const done = routeSegments[r.id] && routeSegments[r.id].length >= r.length;
+      const isSel = selectedRoute && selectedRoute.id === r.id;
+      const badges = [];
+      if (r.tunnel) badges.push('<span class="row-badge tunnel">T</span>');
+      if (r.ferry) badges.push(`<span class="row-badge ferry">F${r.ferry}</span>`);
+      return `<div class="list-row ${isSel ? 'active' : ''} ${done ? 'done' : ''}" onclick="selectRoute(${r.id})">
+        <span class="row-name">${r.id}: ${r.city1}–${r.city2} (${r.length})</span>
+        ${badges.join('')}
+        <span class="row-badge" style="color:${COLOR_MAP[r.color]||'#888'}">${r.color[0].toUpperCase()}</span>
+      </div>`;
+    }).join('');
+  }
+}
+
+function selectCity(name) {
+  selectedCity = name;
+  render(); buildList(); updateActiveInfo();
+}
+
+function selectRoute(id) {
+  selectedRoute = ROUTES.find(r => r.id === id);
+  segCarIdx = routeSegments[id] ? routeSegments[id].length : 0;
+  segClickBuf = [];
+  if (segCarIdx >= selectedRoute.length) {
+    // Already done — allow re-clicking to redo from scratch
+    if (confirm(`Route ${id} already has all ${selectedRoute.length} segments. Redo from scratch?`)) {
+      routeSegments[id] = [];
+      segCarIdx = 0;
+    }
+  }
+  const remaining = selectedRoute.length - segCarIdx;
+  updateActiveInfo(remaining === 0
+    ? `Route ${id} complete. Click to redo.`
+    : `Route ${id}: ${remaining} cars to go. Click 4 corners of each car (TL→TR→BR→BL).`);
+  render(); buildList();
+}
+
+function updateActiveInfo(msg) {
+  const el = document.getElementById('active-info');
+  if (msg) { el.textContent = msg; return; }
+  if (mode === 'cities' && selectedCity) {
+    const pos = cities[selectedCity];
+    el.textContent = `${selectedCity}: (${pos[0]}, ${pos[1]})`;
+  } else if (mode === 'labels' && selectedCity) {
+    const off = labelOffsets[selectedCity];
+    el.textContent = `${selectedCity}: dx=${off[0]}, dy=${off[1]}`;
+  } else {
+    el.textContent = { cities:'Drag dots to reposition · click board to add.', labels:'Drag labels to adjust offset.', segs:'Pick a route from the list.' }[mode];
+  }
+}
+
+// ─── Delete selected city ──────────────────────────────────────────────────────
+function deleteSelectedCity() {
+  if (!selectedCity) return;
+  if (!confirm(`Delete city "${selectedCity}"?`)) return;
+  delete cities[selectedCity];
+  delete labelOffsets[selectedCity];
+  selectedCity = null;
+  render(); buildList();
+}
+
+// ─── Segment navigation helpers ───────────────────────────────────────────────
+function selectRouteByIndex(idx) {
+  const r = ROUTES[idx];
+  selectedRoute = r;
+  segClickBuf = [];
+  segCarIdx = routeSegments[r.id] ? Math.min(routeSegments[r.id].length, r.length) : 0;
+  const remaining = r.length - segCarIdx;
+  updateActiveInfo(remaining === 0
+    ? `Route ${r.id} done (${r.city1}–${r.city2}). Press R to redo.`
+    : `Route ${r.id}: ${r.city1}–${r.city2} — ${remaining} cars to go. Click 4 corners per car.`);
+  render(); buildList();
+  // Scroll active row into view
+  const el = document.querySelector('#item-list .list-row.active');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
+
+function redoCurrentRoute() {
+  if (!selectedRoute) return;
+  routeSegments[selectedRoute.id] = [];
+  segCarIdx = 0;
+  segClickBuf = [];
+  updateActiveInfo(`Redoing route ${selectedRoute.id}: ${selectedRoute.city1}–${selectedRoute.city2}. Click 4 corners of car 1.`);
+  render(); buildList();
+}
+
+// ─── Keyboard shortcuts ────────────────────────────────────────────────────────
+document.addEventListener('keydown', e => {
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
+  if (e.key === 'Delete' && selectedCity && mode === 'cities') { deleteSelectedCity(); return; }
+  if (e.key === 'Escape' && mode === 'segs') { segClickBuf = []; renderSegClickBuf(); return; }
+
+  if (mode === 'segs') {
+    if (e.key === 'd' || e.key === 'D') {
+      e.preventDefault();
+      const idx = selectedRoute ? ROUTES.findIndex(r => r.id === selectedRoute.id) : -1;
+      selectRouteByIndex(Math.min(idx + 1, ROUTES.length - 1));
+      return;
+    }
+    if (e.key === 'a' || e.key === 'A') {
+      e.preventDefault();
+      const idx = selectedRoute ? ROUTES.findIndex(r => r.id === selectedRoute.id) : 1;
+      selectRouteByIndex(Math.max(idx - 1, 0));
+      return;
+    }
+    if (e.key === 'r' || e.key === 'R') {
+      e.preventDefault();
+      redoCurrentRoute();
+      return;
+    }
+  }
+
+  if ((mode === 'cities' || mode === 'labels') && selectedCity) {
+    const step = e.shiftKey ? 5 : 1;
+    const moves = { ArrowLeft:[-step,0], ArrowRight:[step,0], ArrowUp:[0,-step], ArrowDown:[0,step] };
+    if (moves[e.key]) {
+      e.preventDefault();
+      const [ddx, ddy] = moves[e.key];
+      if (mode === 'cities') {
+        cities[selectedCity][0] = Math.round(cities[selectedCity][0] + ddx);
+        cities[selectedCity][1] = Math.round(cities[selectedCity][1] + ddy);
+      } else {
+        labelOffsets[selectedCity][0] = Math.round((labelOffsets[selectedCity][0]||0) + ddx);
+        labelOffsets[selectedCity][1] = Math.round((labelOffsets[selectedCity][1]||14) + ddy);
+      }
+      render(); updateActiveInfo();
+    }
+  }
+});
+
+// ─── Export ────────────────────────────────────────────────────────────────────
+function exportAll() {
+  const out = document.getElementById('output');
+
+  // Cities Python dict
+  let cityLines = ['EUROPE_CITIES = {'];
+  for (const [name, pos] of Object.entries(cities)) {
+    cityLines.push(`    "${name}": (${pos[0]}, ${pos[1]}),`);
+  }
+  cityLines.push('}');
+
+  // Label offsets JS dict
+  let labelLines = ['const EUROPE_LABEL_OFFSETS = {'];
+  for (const [name, off] of Object.entries(labelOffsets)) {
+    labelLines.push(`  "${name}": [${off[0]}, ${off[1]}],`);
+  }
+  labelLines.push('};');
+
+  // Route segments Python dict
+  let segLines = ['EUROPE_ROUTE_SEGMENTS = {'];
+  for (const [rid, segs] of Object.entries(routeSegments)) {
+    if (!segs || segs.length === 0) continue;
+    const items = segs.map(s => `[${s[0]},${s[1]},${s[2]}]`).join(',');
+    segLines.push(`  ${rid}: [${items}],`);
+  }
+  segLines.push('}');
+
+  const full = [
+    '# === EUROPE_CITIES (paste into game_data_europe.py) ===',
+    ...cityLines, '',
+    '# === EUROPE_LABEL_OFFSETS (paste into game.js) ===',
+    ...labelLines, '',
+    '# === EUROPE_ROUTE_SEGMENTS (paste into route_segments_europe.py) ===',
+    ...segLines,
+  ].join('\n');
+
+  out.textContent = full;
+  navigator.clipboard.writeText(full).then(() => {
+    document.getElementById('output-label').textContent = '✓ Copied to clipboard!';
+    setTimeout(() => { document.getElementById('output-label').textContent = 'OUTPUT — copy and paste into code files:'; }, 2500);
+  }).catch(() => {});
+}
+
+// Save/load state to localStorage for persistence
+function saveState() {
+  try {
+    localStorage.setItem('europe_debug_cities', JSON.stringify(cities));
+    localStorage.setItem('europe_debug_labels', JSON.stringify(labelOffsets));
+    localStorage.setItem('europe_debug_segs', JSON.stringify(routeSegments));
+  } catch(e) {}
+}
+
+function loadState() {
+  try {
+    const c = localStorage.getItem('europe_debug_cities');
+    const l = localStorage.getItem('europe_debug_labels');
+    const s = localStorage.getItem('europe_debug_segs');
+    if (c) { const parsed = JSON.parse(c); if (Object.keys(parsed).length > 10) Object.assign(cities, parsed); }
+    if (l) { const parsed = JSON.parse(l); Object.assign(labelOffsets, parsed); }
+    if (s) { const parsed = JSON.parse(s); Object.assign(routeSegments, parsed); }
+  } catch(e) {}
+}
+
+// Auto-save every 5 seconds
+setInterval(saveState, 5000);
+document.addEventListener('visibilitychange', () => { if (document.hidden) saveState(); });
+
+// ─── Init ─────────────────────────────────────────────────────────────────────
+window.addEventListener('load', () => {
+  loadState();
+  const img = document.getElementById('board-img');
+  if (img.complete && img.naturalWidth) { onImgLoad(); }
+  else { img.addEventListener('load', onImgLoad); }
+  buildList();
+  updateActiveInfo();
+});
+</script>
+</body>
+</html>

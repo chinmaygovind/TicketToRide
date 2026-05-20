@@ -63,6 +63,9 @@ class Game(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     last_activity_at = db.Column(db.DateTime, nullable=True)
 
+    # "usa" (default) or "europe"
+    map_variant = db.Column(db.String(10), default="usa", nullable=False)
+
     # Full serialized game state as JSON text
     state_json = db.Column(db.Text, default="{}")
     replay_json = db.Column(db.Text, default="[]")
@@ -84,6 +87,7 @@ class Game(db.Model):
             "status": self.status,
             "max_players": self.max_players,
             "is_private": self.is_private,
+            "map_variant": self.map_variant or "usa",
             "player_count": len(self.players),
             "players": [p.to_dict() for p in self.players],
         }

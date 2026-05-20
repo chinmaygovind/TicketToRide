@@ -33,7 +33,8 @@
   <!-- ===== BOARD ===== -->
   <main class="board-wrapper">
     <div class="board-container" id="board-container">
-      <img id="board-img" src="{{ url_for('static', filename='images/board.svg') }}"
+      <img id="board-img"
+           src="{{ url_for('static', filename='images/europe_board.svg') if map_variant == 'europe' else url_for('static', filename='images/board.svg') }}"
            alt="Ticket to Ride Board" draggable="false"/>
       <svg id="board-svg" xmlns="http://www.w3.org/2000/svg"></svg>
     </div>
@@ -74,7 +75,20 @@
         <div class="scoring-bonus-row">
           <span class="sc-label">Ticket incomplete</span><span class="sc-pts sc-neg">− X pts</span>
         </div>
+        {% if map_variant == 'europe' %}
+        <div class="scoring-bonus-row">
+          <span class="sc-label">Unused station</span><span class="sc-pts sc-pos">+4 pts</span>
+        </div>
+        {% endif %}
       </div>
+      {% if map_variant == 'europe' %}
+      <div style="margin-top:0.75rem;">
+        <button class="action-btn" id="place-station-btn" style="width:100%;font-size:0.78rem;padding:0.5rem 0.5rem;">
+          🏙 Place Station
+          <span id="station-count-badge" class="deck-count">3</span>
+        </button>
+      </div>
+      {% endif %}
     </div>
     <div class="sidebar-section settings-footer">
       <button id="settings-btn" class="settings-btn">⚙ Settings</button>
@@ -240,6 +254,41 @@
   </div>
 </div>
 
+{% if map_variant == 'europe' %}
+<!-- Tunnel challenge modal -->
+<div id="tunnel-modal" class="modal hidden">
+  <div class="modal-backdrop"></div>
+  <div class="modal-box" style="max-width:420px;">
+    <h2>🚇 Tunnel!</h2>
+    <p class="modal-desc" id="tunnel-modal-desc"></p>
+    <div id="tunnel-revealed-cards" style="display:flex;gap:0.5rem;justify-content:center;margin:1rem 0;flex-wrap:wrap;"></div>
+    <div id="tunnel-extra-section" class="hidden">
+      <p style="font-size:0.85rem;color:var(--text-muted);margin-bottom:0.5rem;" id="tunnel-extra-desc"></p>
+      <div id="tunnel-extra-selector" class="card-selector"></div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="tunnel-abort-btn">Abort (lose turn)</button>
+      <button class="btn-primary" id="tunnel-proceed-btn">Pay &amp; Claim</button>
+    </div>
+  </div>
+</div>
+
+<!-- Station placement modal -->
+<div id="station-modal" class="modal hidden">
+  <div class="modal-backdrop" id="station-backdrop"></div>
+  <div class="modal-box" style="max-width:400px;">
+    <h2>🏙 Place Station</h2>
+    <p class="modal-desc" id="station-modal-desc">Click a city on the board to place your station, then choose your payment cards.</p>
+    <div id="station-city-display" style="margin:0.5rem 0;font-size:0.9rem;color:var(--gold);min-height:1.2em;"></div>
+    <div id="station-card-selector" class="card-selector"></div>
+    <div class="modal-footer">
+      <button class="btn-secondary" id="station-cancel-btn">Cancel</button>
+      <button class="btn-primary" id="station-confirm-btn" disabled>Place Station</button>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <script>
 const BOARD_DATA    = {{ board_data | tojson }};
 const GAME_CODE     = "{{ game.code }}";
@@ -248,6 +297,7 @@ const MY_COLOR      = "{{ player.color if player else '' }}";
 const IS_SPECTATOR  = {{ 'true' if is_spectator else 'false' }};
 const MUSIC_FILES   = {{ music_files | tojson }};
 const SPECTATOR_NAME = "{{ (user.username if user else guest_name) if is_spectator else '' }}";
+const MAP_VARIANT   = "{{ map_variant }}";
 </script>
 {% endblock %}
 
