@@ -1,0 +1,495 @@
+{% extends "base.html" %}
+{% block title %}Admin — Ticket to Ride{% endblock %}
+
+{% block head %}
+<style>
+  body { overflow: auto; }
+  .admin-shell {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 1.5rem;
+    font-family: 'Crimson Text', serif;
+    color: var(--text);
+  }
+  .admin-title {
+    font-family: 'Cinzel', serif;
+    font-size: 1.4rem;
+    color: var(--gold);
+    margin-bottom: 1.2rem;
+    letter-spacing: 0.08em;
+  }
+  .table-tabs {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .table-tab {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.06em;
+    transition: background 0.15s, color 0.15s;
+  }
+  .table-tab:hover { background: var(--bg-hover); }
+  .table-tab.active { background: var(--gold); color: #111; border-color: var(--gold); }
+
+  .admin-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    margin-bottom: 0.6rem;
+    flex-wrap: wrap;
+  }
+  .admin-search {
+    padding: 0.35rem 0.7rem;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text);
+    border-radius: 4px;
+    font-size: 0.85rem;
+    width: 220px;
+  }
+  .admin-info { font-size: 0.8rem; color: var(--text-muted); margin-left: auto; }
+
+  .table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+  }
+  table.admin-tbl {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+  }
+  .admin-tbl th {
+    background: var(--bg-panel);
+    color: var(--gold);
+    font-family: 'Cinzel', serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.07em;
+    padding: 0.5rem 0.7rem;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    cursor: pointer;
+    user-select: none;
+  }
+  .admin-tbl th:hover { color: var(--text); }
+  .admin-tbl td {
+    padding: 0.38rem 0.7rem;
+    border-bottom: 1px solid rgba(255,255,255,0.04);
+    max-width: 260px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    vertical-align: middle;
+  }
+  .admin-tbl td.json-cell {
+    font-family: monospace;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    max-width: 160px;
+  }
+  .admin-tbl tr:hover td { background: rgba(255,255,255,0.04); }
+
+  .cell-edit {
+    cursor: pointer;
+  }
+  .cell-edit:hover {
+    background: rgba(200,168,75,0.08) !important;
+    outline: 1px solid rgba(200,168,75,0.3);
+  }
+
+  .btn-sm {
+    padding: 0.22rem 0.55rem;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    font-size: 0.72rem;
+    font-family: 'Cinzel', serif;
+  }
+  .btn-del { background: #7a1f1f; color: #fcc; }
+  .btn-del:hover { background: #9b2626; }
+
+  .pagination {
+    display: flex;
+    gap: 0.4rem;
+    align-items: center;
+    margin-top: 0.8rem;
+    font-size: 0.82rem;
+    color: var(--text-muted);
+  }
+  .page-btn {
+    padding: 0.25rem 0.7rem;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+    color: var(--text);
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 0.78rem;
+  }
+  .page-btn:disabled { opacity: 0.4; cursor: default; }
+  .page-btn.active-page { background: var(--gold); color: #111; border-color: var(--gold); }
+
+  .edit-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 1000;
+  }
+  .edit-box {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.4rem 1.6rem;
+    min-width: 380px;
+    max-width: 560px;
+    max-height: 80vh;
+    overflow-y: auto;
+    position: relative;
+  }
+  .edit-box h3 {
+    font-family: 'Cinzel', serif;
+    font-size: 1rem;
+    color: var(--gold);
+    margin-bottom: 1rem;
+  }
+  .edit-field {
+    margin-bottom: 0.7rem;
+  }
+  .edit-field label {
+    display: block;
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-family: 'Cinzel', serif;
+    letter-spacing: 0.06em;
+    margin-bottom: 0.2rem;
+  }
+  .edit-field input, .edit-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 4px;
+    padding: 0.35rem 0.55rem;
+    font-size: 0.82rem;
+    font-family: monospace;
+  }
+  .edit-field textarea { height: 80px; resize: vertical; }
+  .edit-footer {
+    display: flex;
+    gap: 0.6rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+  }
+  .btn-cancel {
+    padding: 0.4rem 1rem;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+  }
+  .btn-save {
+    padding: 0.4rem 1rem;
+    border: none;
+    background: var(--gold);
+    color: #111;
+    border-radius: 4px;
+    cursor: pointer;
+    font-family: 'Cinzel', serif;
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+  .status-msg {
+    font-size: 0.8rem;
+    margin-left: 0.5rem;
+  }
+  .status-ok { color: #6c6; }
+  .status-err { color: #f66; }
+</style>
+{% endblock %}
+
+{% block body %}
+<div class="admin-shell">
+  <div class="admin-title">⚙ Admin Panel</div>
+
+  <div class="table-tabs" id="table-tabs">
+    <button class="table-tab active" data-table="users">Users</button>
+    <button class="table-tab" data-table="games">Games</button>
+    <button class="table-tab" data-table="players">Players</button>
+    <button class="table-tab" data-table="game_results">Game Results</button>
+    <button class="table-tab" data-table="friendships">Friendships</button>
+  </div>
+
+  <div class="admin-toolbar">
+    <input type="text" class="admin-search" id="search-input" placeholder="Filter rows…"/>
+    <span class="admin-info" id="admin-info"></span>
+  </div>
+
+  <div class="table-wrap">
+    <table class="admin-tbl">
+      <thead id="tbl-head"></thead>
+      <tbody id="tbl-body"></tbody>
+    </table>
+  </div>
+
+  <div class="pagination" id="pagination"></div>
+</div>
+
+<!-- Edit overlay -->
+<div class="edit-overlay" id="edit-overlay" style="display:none;">
+  <div class="edit-box">
+    <h3 id="edit-title">Edit Row</h3>
+    <div id="edit-fields"></div>
+    <div class="edit-footer">
+      <button class="btn-cancel" id="edit-cancel-btn">Cancel</button>
+      <button class="btn-save" id="edit-save-btn">Save</button>
+      <span class="status-msg" id="edit-status"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  let currentTable = 'users';
+  let currentPage = 1;
+  let currentData = null;
+  let sortCol = null;
+  let sortDir = 1;
+  let editRow = null;
+
+  const head = document.getElementById('tbl-head');
+  const body = document.getElementById('tbl-body');
+  const info = document.getElementById('admin-info');
+  const pag = document.getElementById('pagination');
+  const searchInput = document.getElementById('search-input');
+  const overlay = document.getElementById('edit-overlay');
+
+  document.getElementById('table-tabs').addEventListener('click', e => {
+    const tab = e.target.closest('.table-tab');
+    if (!tab) return;
+    document.querySelectorAll('.table-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    currentTable = tab.dataset.table;
+    currentPage = 1;
+    sortCol = null;
+    searchInput.value = '';
+    loadTable();
+  });
+
+  searchInput.addEventListener('input', renderFiltered);
+
+  function loadTable(page) {
+    if (page) currentPage = page;
+    fetch(`/admin/table/${currentTable}?page=${currentPage}`)
+      .then(r => r.json())
+      .then(data => {
+        currentData = data;
+        renderTable();
+        renderPagination();
+      });
+  }
+
+  function renderTable() {
+    if (!currentData) return;
+    const cols = currentData.columns;
+
+    // Header
+    head.innerHTML = '';
+    const tr = document.createElement('tr');
+    cols.forEach((col, i) => {
+      const th = document.createElement('th');
+      th.textContent = col;
+      if (sortCol === i) th.textContent += sortDir > 0 ? ' ▲' : ' ▼';
+      th.addEventListener('click', () => {
+        if (sortCol === i) sortDir *= -1; else { sortCol = i; sortDir = 1; }
+        renderFiltered();
+      });
+      tr.appendChild(th);
+    });
+    // Actions column header
+    const thAct = document.createElement('th');
+    thAct.textContent = '';
+    tr.appendChild(thAct);
+    head.appendChild(tr);
+
+    renderFiltered();
+  }
+
+  function renderFiltered() {
+    if (!currentData) return;
+    const cols = currentData.columns;
+    const filter = searchInput.value.toLowerCase();
+    let rows = currentData.rows.filter(row =>
+      row.some(cell => String(cell ?? '').toLowerCase().includes(filter))
+    );
+    if (sortCol !== null) {
+      rows = rows.slice().sort((a, b) => {
+        const av = a[sortCol], bv = b[sortCol];
+        if (av === bv) return 0;
+        if (av === null) return 1; if (bv === null) return -1;
+        return (av < bv ? -1 : 1) * sortDir;
+      });
+    }
+    body.innerHTML = '';
+    rows.forEach(row => {
+      const tr = document.createElement('tr');
+      cols.forEach((col, i) => {
+        const td = document.createElement('td');
+        const val = row[i];
+        const isJson = typeof val === 'string' && (val.startsWith('{') || val.startsWith('['));
+        if (isJson) td.classList.add('json-cell');
+        td.textContent = val === null ? 'null' : String(val);
+        td.title = val === null ? 'null' : String(val);
+        td.classList.add('cell-edit');
+        td.addEventListener('dblclick', () => openEdit(row, cols));
+        tr.appendChild(td);
+      });
+      // Action buttons
+      const tdAct = document.createElement('td');
+      tdAct.style.whiteSpace = 'nowrap';
+      const editBtn = document.createElement('button');
+      editBtn.className = 'btn-sm';
+      editBtn.style.cssText = 'background:#1e3a1e;color:#9f9;margin-right:4px;border:1px solid #2d5a2d;';
+      editBtn.textContent = 'Edit';
+      editBtn.addEventListener('click', () => openEdit(row, cols));
+      const delBtn = document.createElement('button');
+      delBtn.className = 'btn-sm btn-del';
+      delBtn.textContent = 'Del';
+      delBtn.addEventListener('click', () => deleteRow(row, cols));
+      tdAct.appendChild(editBtn);
+      tdAct.appendChild(delBtn);
+      tr.appendChild(tdAct);
+      body.appendChild(tr);
+    });
+    info.textContent = `${rows.length} of ${currentData.total} rows (page ${currentData.page})`;
+  }
+
+  function renderPagination() {
+    if (!currentData) return;
+    const totalPages = Math.ceil(currentData.total / currentData.per_page);
+    pag.innerHTML = '';
+    const prev = document.createElement('button');
+    prev.className = 'page-btn';
+    prev.textContent = '← Prev';
+    prev.disabled = currentPage <= 1;
+    prev.addEventListener('click', () => loadTable(currentPage - 1));
+    pag.appendChild(prev);
+
+    const pageInfo = document.createElement('span');
+    pageInfo.textContent = `Page ${currentPage} of ${totalPages}`;
+    pag.appendChild(pageInfo);
+
+    const next = document.createElement('button');
+    next.className = 'page-btn';
+    next.textContent = 'Next →';
+    next.disabled = currentPage >= totalPages;
+    next.addEventListener('click', () => loadTable(currentPage + 1));
+    pag.appendChild(next);
+  }
+
+  function openEdit(row, cols) {
+    editRow = { row, cols };
+    document.getElementById('edit-title').textContent = `Edit ${currentTable} #${row[0]}`;
+    const fieldsDiv = document.getElementById('edit-fields');
+    fieldsDiv.innerHTML = '';
+    cols.forEach((col, i) => {
+      const div = document.createElement('div');
+      div.className = 'edit-field';
+      const label = document.createElement('label');
+      label.textContent = col;
+      div.appendChild(label);
+      const val = row[i];
+      const isLong = typeof val === 'string' && val.length > 80;
+      let input;
+      if (isLong) {
+        input = document.createElement('textarea');
+      } else {
+        input = document.createElement('input');
+        input.type = 'text';
+      }
+      input.value = val === null ? '' : String(val);
+      input.dataset.col = col;
+      input.dataset.idx = i;
+      if (col === 'id') input.readOnly = true;
+      div.appendChild(input);
+      fieldsDiv.appendChild(div);
+    });
+    document.getElementById('edit-status').textContent = '';
+    overlay.style.display = 'flex';
+  }
+
+  document.getElementById('edit-cancel-btn').addEventListener('click', () => {
+    overlay.style.display = 'none';
+    editRow = null;
+  });
+
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) { overlay.style.display = 'none'; editRow = null; }
+  });
+
+  document.getElementById('edit-save-btn').addEventListener('click', () => {
+    if (!editRow) return;
+    const { row, cols } = editRow;
+    const rowId = row[0];
+    const payload = {};
+    document.querySelectorAll('#edit-fields [data-col]').forEach(input => {
+      const col = input.dataset.col;
+      if (col === 'id') return;
+      let val = input.value;
+      if (val === 'null' || val === '') val = null;
+      payload[col] = val;
+    });
+    const statusEl = document.getElementById('edit-status');
+    statusEl.textContent = 'Saving…';
+    statusEl.className = 'status-msg';
+    fetch(`/admin/edit/${currentTable}/${rowId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    }).then(r => r.json()).then(data => {
+      if (data.ok) {
+        statusEl.textContent = 'Saved!';
+        statusEl.className = 'status-msg status-ok';
+        overlay.style.display = 'none';
+        editRow = null;
+        loadTable();
+      } else {
+        statusEl.textContent = data.error || 'Error';
+        statusEl.className = 'status-msg status-err';
+      }
+    }).catch(() => {
+      statusEl.textContent = 'Network error';
+      statusEl.className = 'status-msg status-err';
+    });
+  });
+
+  function deleteRow(row, cols) {
+    const rowId = row[0];
+    if (!confirm(`Delete ${currentTable} #${rowId}?`)) return;
+    fetch(`/admin/delete/${currentTable}/${rowId}`, { method: 'POST' })
+      .then(r => r.json())
+      .then(data => {
+        if (data.ok) loadTable();
+        else alert(data.error || 'Error deleting row');
+      });
+  }
+
+  // Initial load
+  loadTable();
+})();
+</script>
+{% endblock %}

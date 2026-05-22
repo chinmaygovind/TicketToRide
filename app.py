@@ -693,6 +693,96 @@ def leaderboard():
     return render_template("leaderboard.html", players=top, user=current_user)
 
 
+@app.route("/admin")
+def admin_page():
+    user = get_current_user()
+    if not user or user.username != "chinmay":
+        return redirect(url_for("login_page"))
+    return render_template("admin.html", user=user)
+
+
+@app.route("/admin/table/<table_name>")
+def admin_table(table_name):
+    user = get_current_user()
+    if not user or user.username != "chinmay":
+        return ("Forbidden", 403)
+    table_map = {
+        "users": User,
+        "games": Game,
+        "players": Player,
+        "game_results": GameResult,
+        "friendships": Friendship,
+    }
+    model = table_map.get(table_name)
+    if not model:
+        return ("Not found", 404)
+    page = request.args.get("page", 1, type=int)
+    per_page = 50
+    q = model.query.order_by(model.id.desc())
+    total = q.count()
+    rows = q.offset((page - 1) * per_page).limit(per_page).all()
+    cols = [c.name for c in model.__table__.columns]
+    data = [[getattr(r, c) for c in cols] for r in rows]
+    return jsonify({
+        "table": table_name,
+        "columns": cols,
+        "rows": data,
+        "total": total,
+        "page": page,
+        "per_page": per_page,
+    })
+
+
+@app.route("/admin/edit/<table_name>/<int:row_id>", methods=["POST"])
+def admin_edit(table_name, row_id):
+    user = get_current_user()
+    if not user or user.username != "chinmay":
+        return ("Forbidden", 403)
+    table_map = {
+        "users": User,
+        "games": Game,
+        "players": Player,
+        "game_results": GameResult,
+        "friendships": Friendship,
+    }
+    model = table_map.get(table_name)
+    if not model:
+        return jsonify({"error": "Not found"}), 404
+    row = model.query.get(row_id)
+    if not row:
+        return jsonify({"error": "Row not found"}), 404
+    payload = request.get_json(force=True)
+    cols = {c.name for c in model.__table__.columns}
+    for key, val in payload.items():
+        if key in cols and key != "id":
+            setattr(row, key, val)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/admin/delete/<table_name>/<int:row_id>", methods=["POST"])
+def admin_delete(table_name, row_id):
+    user = get_current_user()
+    if not user or user.username != "chinmay":
+        return ("Forbidden", 403)
+    table_map = {
+        "users": User,
+        "games": Game,
+        "players": Player,
+        "game_results": GameResult,
+        "friendships": Friendship,
+    }
+    model = table_map.get(table_name)
+    if not model:
+        return jsonify({"error": "Not found"}), 404
+    row = model.query.get(row_id)
+    if not row:
+        return jsonify({"error": "Row not found"}), 404
+    db.session.delete(row)
+    db.session.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/lobbies")
 @require_login
 def lobbies():
@@ -868,9 +958,6 @@ def game_page(code):
 # ---------------------------------------------------------------------------
 
 _chat_history: dict[str, list] = {}  # game_code -> [{name, msg, ts}, …] max 100
-_undo_snapshots: dict[str, str] = {}  # game_code -> old state_json
-_undo_votes: dict[str, set] = {}     # game_code -> set of player_ids who approved
-_undo_requester: dict[str, int] = {} # game_code -> player_id who requested
 _online_users: dict[int, str] = {}   # user_id -> socket_sid
 
 
@@ -1144,51 +1231,6 @@ def on_place_station(data):
     _player_action(code, lambda state, pid: logic.place_station(state, pid, city, cards))
 
 
-@socketio.on("request_undo")
-def on_request_undo(data):
-    code = data.get("code", "").upper()
-    game = Game.query.filter_by(code=code, status="playing").first()
-    if not game or code not in _undo_snapshots:
-        return emit("error", {"message": "Nothing to undo."})
-    sid_key = get_session_key()
-    player = Player.query.filter_by(game_id=game.id, session_key=sid_key).first()
-    if not player:
-        return
-    _undo_votes[code] = set()
-    _undo_requester[code] = player.id
-    socketio.emit("undo_requested", {"by": player.name, "player_id": player.id}, to=code)
-
-
-@socketio.on("vote_undo")
-def on_vote_undo(data):
-    code = data.get("code", "").upper()
-    approve = data.get("approve", False)
-    game = Game.query.filter_by(code=code, status="playing").first()
-    if not game or code not in _undo_votes:
-        return
-    sid_key = get_session_key()
-    player = Player.query.filter_by(game_id=game.id, session_key=sid_key).first()
-    if not player:
-        return
-    if not approve:
-        _undo_votes.pop(code, None)
-        _undo_requester.pop(code, None)
-        socketio.emit("undo_rejected", {}, to=code)
-        return
-    _undo_votes[code].add(player.id)
-    # Auto-approve for bots; check if all humans (except requester) have approved
-    human_ids = {p.id for p in game.players if not p.session_key.startswith("bot_")}
-    needed = human_ids - {_undo_requester.get(code)}
-    if _undo_votes[code] >= needed:
-        snap_json = _undo_snapshots.pop(code)
-        game.state_json = snap_json
-        db.session.commit()
-        _undo_votes.pop(code, None)
-        _undo_requester.pop(code, None)
-        _broadcast_state(game, code)
-        socketio.emit("undo_applied", {}, to=code)
-
-
 @socketio.on("send_chat")
 def on_send_chat(data):
     code = data.get("code", "").upper()
@@ -1227,16 +1269,11 @@ def _player_action(code: str, action_fn):
         emit("error", {"message": "You are not in this game."})
         return
 
-    old_state_json = game.state_json  # capture before action for undo
     state = game.state
     result = action_fn(state, str(player.id))
     if not result["ok"]:
         emit("error", {"message": result.get("error", "Action failed.")})
         return
-
-    _undo_snapshots[code] = old_state_json
-    _undo_votes.pop(code, None)
-    _undo_requester.pop(code, None)
 
     game.state = state
 
@@ -1371,7 +1408,6 @@ def _broadcast_state(game: Game, code: str):
     generic = logic.get_public_state(state, "")
     generic["host_player_id"] = host_id
     generic["bot_player_ids"] = bot_ids
-    generic["has_undo_snapshot"] = code in _undo_snapshots
     socketio.emit("game_state_update", generic, to=code)
 
 

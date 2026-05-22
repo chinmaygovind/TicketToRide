@@ -432,7 +432,7 @@ socket.on('game_state_update', (state) => {
   }
   // Europe-specific top-level fields
   if (state.stations !== undefined) gameState.stations = state.stations;
-  if ('pending_tunnel' in state) gameState.pending_tunnel = state.pending_tunnel;
+  gameState.pending_tunnel = ('pending_tunnel' in state) ? state.pending_tunnel : null;
 
   // Animate other players' draws from action log
   animateFromActionLog(gameState.action_log);
@@ -785,37 +785,45 @@ function renderBoard() {
         svg.appendChild(pip);
       }
 
-      // Tunnel indicator: small diagonal hatch marks on each segment
-      if (route.tunnel && !claimedBy && !isClosed) {
-        const hatch = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-        hatch.setAttribute('x1', seg.cx - 3);
-        hatch.setAttribute('y1', seg.cy - 3);
-        hatch.setAttribute('x2', seg.cx + 3);
-        hatch.setAttribute('y2', seg.cy + 3);
-        hatch.setAttribute('stroke', 'rgba(255,255,255,0.5)');
-        hatch.setAttribute('stroke-width', '1.5');
-        hatch.setAttribute('pointer-events', 'none');
-        hatch.setAttribute('transform', `rotate(${seg.angle}, ${seg.cx}, ${seg.cy})`);
-        svg.appendChild(hatch);
+    }
+
+    // Tunnel indicator: solid black outline on each segment
+    if (route.tunnel && !claimedBy && !isClosed) {
+      for (const seg of segments) {
+        const outline = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        outline.setAttribute('x', seg.x - 1);
+        outline.setAttribute('y', seg.y - 1);
+        outline.setAttribute('width', seg.w + 2);
+        outline.setAttribute('height', seg.h + 2);
+        outline.setAttribute('transform', `rotate(${seg.angle}, ${seg.cx}, ${seg.cy})`);
+        outline.setAttribute('rx', '3');
+        outline.setAttribute('fill', 'none');
+        outline.setAttribute('stroke', 'rgba(0,0,0,0.75)');
+        outline.setAttribute('stroke-width', '1.5');
+        outline.setAttribute('pointer-events', 'none');
+        svg.appendChild(outline);
       }
     }
 
-    // Ferry indicator: loco icon at midpoint of route
-    if (route.ferry && !claimedBy && !isClosed && segments.length > 0) {
-      const mid = segments[Math.floor(segments.length / 2)];
-      const locoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      locoText.setAttribute('x', mid.cx);
-      locoText.setAttribute('y', mid.cy - 8);
-      locoText.setAttribute('font-size', '9');
-      locoText.setAttribute('fill', '#fff');
-      locoText.setAttribute('stroke', '#1a1210');
-      locoText.setAttribute('stroke-width', '2');
-      locoText.setAttribute('paint-order', 'stroke');
-      locoText.setAttribute('text-anchor', 'middle');
-      locoText.setAttribute('dominant-baseline', 'middle');
-      locoText.setAttribute('pointer-events', 'none');
-      locoText.textContent = '🚂×' + route.ferry;
-      svg.appendChild(locoText);
+    // Ferry indicator: train icon on specific segments
+    if (route.ferry_segments && !claimedBy && !isClosed) {
+      for (const segIdx of route.ferry_segments) {
+        const seg = segments[segIdx];
+        if (!seg) continue;
+        const locoIcon = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        locoIcon.setAttribute('x', seg.cx);
+        locoIcon.setAttribute('y', seg.cy);
+        locoIcon.setAttribute('font-size', '7');
+        locoIcon.setAttribute('fill', '#111');
+        locoIcon.setAttribute('stroke', 'rgba(255,255,255,0.6)');
+        locoIcon.setAttribute('stroke-width', '1.5');
+        locoIcon.setAttribute('paint-order', 'stroke');
+        locoIcon.setAttribute('text-anchor', 'middle');
+        locoIcon.setAttribute('dominant-baseline', 'middle');
+        locoIcon.setAttribute('pointer-events', 'none');
+        locoIcon.textContent = '🚂';
+        svg.appendChild(locoIcon);
+      }
     }
   }
 
@@ -1209,21 +1217,6 @@ function renderActionButtons() {
     if (!isMyTurn && stationPlacementMode) exitStationPlacementMode();
   }
 
-  // Undo button — visible when a snapshot exists, it's your turn, and no vote pending
-  let undoBtn = document.getElementById('undo-action-btn');
-  const hasUndo = gameState.has_undo_snapshot && isMyTurn &&
-    (gameState.phase === 'main' || gameState.phase === 'final_round');
-  if (hasUndo && !undoBtn) {
-    undoBtn = document.createElement('button');
-    undoBtn.id = 'undo-action-btn';
-    undoBtn.className = 'action-btn';
-    undoBtn.title = 'Request to undo last action (all players must approve)';
-    undoBtn.textContent = '↩ Request Undo';
-    undoBtn.addEventListener('click', () => socket.emit('request_undo', { code: GAME_CODE }));
-    document.getElementById('draw-tickets-btn').parentElement.appendChild(undoBtn);
-  } else if (!hasUndo && undoBtn) {
-    undoBtn.remove();
-  }
 }
 
 // ─── Actions ─────────────────────────────────────────────────────────────────
@@ -1599,9 +1592,7 @@ function openInitialTicketsModal() {
     isInitial ? 'Choose Your Starting Tickets' : 'Keep Destination Tickets';
 
   const longTicketId = (isInitial && isEurope) ? me.long_ticket_id : null;
-  let descText = isInitial && isEurope
-    ? `Keep at least ${minKeep} tickets. The blue card is your long route.`
-    : `Choose which tickets to keep (minimum ${minKeep}).`;
+  let descText = `Choose which tickets to keep (minimum ${minKeep}).`;
   document.getElementById('ticket-modal-desc').textContent = descText;
 
   const tickets = me.pending_tickets;
@@ -1932,42 +1923,6 @@ _initMusic();
   };
 })();
 
-// ─── Undo vote handlers ───────────────────────────────────────────────────────
-
-socket.on('undo_requested', data => {
-  // If I'm the requester, just show a toast
-  if (data.player_id && String(data.player_id) === String(MY_PLAYER_ID)) {
-    showToast('↩ Undo request sent — waiting for others to approve.', '#f59e0b', 5000);
-    return;
-  }
-  if (IS_SPECTATOR) return;
-  document.getElementById('undo-vote-desc').textContent =
-    `${escHtml(data.by)} wants to undo their last action. Do you approve?`;
-  openModal('undo-vote-modal');
-});
-
-socket.on('undo_applied', () => {
-  closeModal('undo-vote-modal');
-  showToast('↩ Undo applied!', '#22c55e', 3000);
-});
-
-socket.on('undo_rejected', () => {
-  closeModal('undo-vote-modal');
-  showToast('↩ Undo declined.', '#ef4444', 3000);
-});
-
-document.getElementById('undo-approve-btn').addEventListener('click', () => {
-  socket.emit('vote_undo', { code: GAME_CODE, approve: true });
-  closeModal('undo-vote-modal');
-});
-document.getElementById('undo-reject-btn').addEventListener('click', () => {
-  socket.emit('vote_undo', { code: GAME_CODE, approve: false });
-  closeModal('undo-vote-modal');
-});
-document.getElementById('undo-vote-backdrop').addEventListener('click', () => {
-  socket.emit('vote_undo', { code: GAME_CODE, approve: false });
-  closeModal('undo-vote-modal');
-});
 
 // ─── Keyboard shortcuts ────────────────────────────────────────────────────────
 
@@ -1991,7 +1946,7 @@ document.addEventListener('keydown', (e) => {
   // Ignore remaining shortcuts when typing or a modal is open
   const inInput = e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA';
   if (inInput) return;
-  const modalOpen = ['claim-modal','ticket-modal','settings-modal','undo-vote-modal','tunnel-modal','station-modal'].some(
+  const modalOpen = ['claim-modal','ticket-modal','settings-modal','tunnel-modal','station-modal'].some(
     id => { const el = document.getElementById(id); return el && !el.classList.contains('hidden'); }
   );
   if (modalOpen) return;

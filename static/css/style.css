@@ -893,8 +893,8 @@ html, body {
 
 /* Ticket choices */
 .ticket-choices { display: flex; flex-direction: column; gap: 0.6rem; }
-.long-ticket-card { background: #0d1520; border-color: #1e3a5c; }
-.long-ticket-card.selected { border-color: #3b82f6; }
+.long-ticket-card { background: #0d1f3a; border-color: #2a5a9a; border-width: 2px; }
+.long-ticket-card.selected { border-color: #3b82f6; background: #0d2a52; }
 .ticket-choice {
   display: flex;
   align-items: center;
@@ -1116,9 +1116,11 @@ html, body {
 #ticket-modal .modal-backdrop {
   background: rgba(0,0,0,0.25);
 }
+#ticket-view-board-btn { display: none; }
+
 #ticket-modal .modal-box {
-  max-width: 240px;
-  width: 240px;
+  max-width: 262px;
+  width: 262px;
   max-height: 100vh;
   height: 100%;
   overflow-y: auto;
@@ -2016,6 +2018,7 @@ body.spectating #draw-blind-btn { display: none; }
   }
 
   /* Ticket modal: center on mobile instead of side panel */
+  #ticket-view-board-btn { display: block; }
   #ticket-modal {
     justify-content: center !important;
     align-items: center !important;

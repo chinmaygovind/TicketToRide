@@ -60,7 +60,7 @@ EUROPE_CITIES = {
 }
 
 # ── Route scoring (same as USA) ────────────────────────────────────────────────
-EUROPE_ROUTE_SCORING = {1: 1, 2: 2, 3: 4, 4: 7, 5: 10, 6: 15}
+EUROPE_ROUTE_SCORING = {1: 1, 2: 2, 3: 4, 4: 7, 5: 10, 6: 15, 7: 18, 8: 21}
 
 # ── Routes ───────────────────────────────────────────────────────────────────
 # id, city1, city2, length, color, double_group, side, tunnel, ferry
@@ -72,9 +72,9 @@ EUROPE_ROUTES = [
     # ── UK & North Sea ──────────────────────────────────────────────────────
     {"id":101,"city1":"Edinburgh",    "city2":"London",        "length":4,"color":"orange","double_group":"EDI-LON",     "side":0,"tunnel":False,"ferry":0},
     {"id":102,"city1":"Edinburgh",    "city2":"London",        "length":4,"color":"black", "double_group":"EDI-LON",     "side":1,"tunnel":False,"ferry":0},
-    {"id":103,"city1":"London",       "city2":"Amsterdam",     "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1},
-    {"id":104,"city1":"London",       "city2":"Dieppe",        "length":2,"color":"gray",  "double_group":"LON-DIE",     "side":0,"tunnel":False,"ferry":1},
-    {"id":205,"city1":"London",       "city2":"Dieppe",        "length":2,"color":"gray",  "double_group":"LON-DIE",     "side":1,"tunnel":False,"ferry":1},
+    {"id":103,"city1":"London",       "city2":"Amsterdam",     "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0,1]},
+    {"id":104,"city1":"London",       "city2":"Dieppe",        "length":2,"color":"gray",  "double_group":"LON-DIE",     "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":205,"city1":"London",       "city2":"Dieppe",        "length":2,"color":"gray",  "double_group":"LON-DIE",     "side":1,"tunnel":False,"ferry":1,"ferry_segments":[0]},
 
     # ── Benelux & Germany ───────────────────────────────────────────────────
     {"id":105,"city1":"Amsterdam",    "city2":"Bruxelles",     "length":1,"color":"black", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
@@ -88,8 +88,8 @@ EUROPE_ROUTES = [
     {"id":113,"city1":"Dieppe",       "city2":"Paris",         "length":1,"color":"pink",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":114,"city1":"Essen",        "city2":"Berlin",        "length":2,"color":"blue",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":115,"city1":"Essen",        "city2":"Frankfurt",     "length":2,"color":"green", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
-    {"id":117,"city1":"Essen",        "city2":"Kobenhavn",     "length":3,"color":"gray",  "double_group":"ESS-KOB",     "side":0,"tunnel":False,"ferry":1},
-    {"id":118,"city1":"Essen",        "city2":"Kobenhavn",     "length":3,"color":"gray",  "double_group":"ESS-KOB",     "side":1,"tunnel":False,"ferry":1},
+    {"id":117,"city1":"Essen",        "city2":"Kobenhavn",     "length":3,"color":"gray",  "double_group":"ESS-KOB",     "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":118,"city1":"Essen",        "city2":"Kobenhavn",     "length":3,"color":"gray",  "double_group":"ESS-KOB",     "side":1,"tunnel":False,"ferry":1,"ferry_segments":[0]},
     {"id":119,"city1":"Frankfurt",    "city2":"Berlin",        "length":3,"color":"black", "double_group":"FRA-BER",     "side":0,"tunnel":False,"ferry":0},
     {"id":120,"city1":"Frankfurt",    "city2":"Berlin",        "length":3,"color":"red",   "double_group":"FRA-BER",     "side":1,"tunnel":False,"ferry":0},
     {"id":121,"city1":"Frankfurt",    "city2":"Munchen",       "length":2,"color":"pink",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
@@ -137,9 +137,10 @@ EUROPE_ROUTES = [
     # ── Italy ────────────────────────────────────────────────────────────────
     {"id":156,"city1":"Venezia",      "city2":"Roma",          "length":2,"color":"black", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":158,"city1":"Roma",         "city2":"Brindisi",      "length":2,"color":"white", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
-    {"id":159,"city1":"Roma",         "city2":"Palermo",       "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1},
-    {"id":160,"city1":"Brindisi",     "city2":"Palermo",       "length":3,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1},
-    {"id":161,"city1":"Brindisi",     "city2":"Athina",        "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1},
+    {"id":159,"city1":"Roma",         "city2":"Palermo",       "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":160,"city1":"Brindisi",     "city2":"Palermo",       "length":3,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":161,"city1":"Brindisi",     "city2":"Athina",        "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":218,"city1":"Athina",       "city2":"Smyrna",        "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
     {"id":213,"city1":"Athina",       "city2":"Sarajevo",      "length":4,"color":"green", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
 
     # ── Scandinavia & Baltics ────────────────────────────────────────────────
@@ -172,7 +173,7 @@ EUROPE_ROUTES = [
     {"id":189,"city1":"Bucuresti",    "city2":"Sofia",         "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":True, "ferry":0},
     {"id":190,"city1":"Bucuresti",    "city2":"Constantinople","length":3,"color":"yellow","double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":191,"city1":"Bucuresti",    "city2":"Sevastopol",    "length":4,"color":"white", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
-    {"id":192,"city1":"Sevastopol",   "city2":"Constantinople","length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2},
+    {"id":192,"city1":"Sevastopol",   "city2":"Constantinople","length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2,"ferry_segments":[0,1]},
     {"id":196,"city1":"Sofia",        "city2":"Constantinople","length":3,"color":"blue",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":197,"city1":"Sofia",        "city2":"Athina",        "length":3,"color":"pink",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
 
@@ -182,9 +183,9 @@ EUROPE_ROUTES = [
     {"id":201,"city1":"Smyrna",       "city2":"Angora",        "length":3,"color":"orange","double_group":None,          "side":0,"tunnel":True, "ferry":0},
     {"id":202,"city1":"Angora",       "city2":"Erzurum",       "length":3,"color":"black", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":203,"city1":"Erzurum",      "city2":"Sochi",         "length":3,"color":"red",   "double_group":None,          "side":0,"tunnel":True, "ferry":0},
-    {"id":215,"city1":"Sochi",        "city2":"Sevastopol",    "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1},
-    {"id":216,"city1":"Erzurum",      "city2":"Sevastopol",    "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2},
-    {"id":217,"city1":"Smyrna",       "city2":"Palermo",       "length":6,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2},
+    {"id":215,"city1":"Sochi",        "city2":"Sevastopol",    "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":1,"ferry_segments":[0]},
+    {"id":216,"city1":"Erzurum",      "city2":"Sevastopol",    "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2,"ferry_segments":[0,1]},
+    {"id":217,"city1":"Smyrna",       "city2":"Palermo",       "length":6,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":2,"ferry_segments":[0,1]},
 ]
 
 # ── Destination Tickets ───────────────────────────────────────────────────────
