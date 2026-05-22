@@ -24,6 +24,14 @@
         <span id="deck-count" class="deck-count">110</span>
       </button>
     </div>
+    {% if map_variant == 'europe' %}
+    <div class="sidebar-section" style="padding:0.5rem 0.9rem;flex-shrink:0;">
+      <button class="action-btn" id="place-station-btn" style="width:100%;font-size:0.78rem;padding:0.5rem 0.5rem;">
+        🏙 Place Station
+        <span id="station-count-badge" class="deck-count">3</span>
+      </button>
+    </div>
+    {% endif %}
     <div class="sidebar-section" id="hand-section">
       <div class="sidebar-label">YOUR HAND</div>
       <div id="hand-cards" class="hand-area"></div>
@@ -55,43 +63,11 @@
       <div class="sidebar-label" id="action-log-label">ACTION LOG</div>
       <div id="action-log" class="action-log"></div>
     </div>
-    <div class="sidebar-section scoring-section" id="scoring-section">
-      <div class="sidebar-label">SCORING REFERENCE</div>
-      <div class="scoring-grid">
-        <div class="scoring-grid-row"><span class="sc-label">1 car</span><span class="sc-pts">1 pt</span></div>
-        <div class="scoring-grid-row"><span class="sc-label">2 cars</span><span class="sc-pts">2 pts</span></div>
-        <div class="scoring-grid-row"><span class="sc-label">3 cars</span><span class="sc-pts">4 pts</span></div>
-        <div class="scoring-grid-row"><span class="sc-label">4 cars</span><span class="sc-pts">7 pts</span></div>
-        <div class="scoring-grid-row"><span class="sc-label">5 cars</span><span class="sc-pts">10 pts</span></div>
-        <div class="scoring-grid-row"><span class="sc-label">6 cars</span><span class="sc-pts">15 pts</span></div>
-      </div>
-      <div class="scoring-bonuses">
-        <div class="scoring-bonus-row">
-          <span class="sc-label">Longest path</span><span class="sc-pts sc-pos">+10 pts</span>
-        </div>
-        <div class="scoring-bonus-row">
-          <span class="sc-label">Ticket complete</span><span class="sc-pts sc-pos">+ X pts</span>
-        </div>
-        <div class="scoring-bonus-row">
-          <span class="sc-label">Ticket incomplete</span><span class="sc-pts sc-neg">− X pts</span>
-        </div>
-        {% if map_variant == 'europe' %}
-        <div class="scoring-bonus-row">
-          <span class="sc-label">Unused station</span><span class="sc-pts sc-pos">+4 pts</span>
-        </div>
-        {% endif %}
-      </div>
-      {% if map_variant == 'europe' %}
-      <div style="margin-top:0.75rem;">
-        <button class="action-btn" id="place-station-btn" style="width:100%;font-size:0.78rem;padding:0.5rem 0.5rem;">
-          🏙 Place Station
-          <span id="station-count-badge" class="deck-count">3</span>
-        </button>
-      </div>
-      {% endif %}
-    </div>
     <div class="sidebar-section settings-footer">
-      <button id="settings-btn" class="settings-btn">⚙ Settings</button>
+      <div class="settings-btn-row">
+        <button id="settings-btn" class="settings-btn">⚙</button>
+        <button id="rules-btn" class="settings-btn">?</button>
+      </div>
     </div>
   </aside>
 
@@ -163,6 +139,7 @@
     <p id="ticket-modal-desc" class="modal-desc"></p>
     <div id="ticket-choices" class="ticket-choices"></div>
     <div class="modal-footer">
+      <button class="btn-secondary" id="ticket-view-board-btn">View Board</button>
       <button class="btn-primary" id="ticket-confirm-btn">Confirm</button>
     </div>
   </div>
@@ -183,7 +160,7 @@
 
 <div id="settings-modal" class="modal hidden">
   <div class="modal-backdrop" id="settings-backdrop"></div>
-  <div class="modal-box" style="max-width:310px;">
+  <div class="modal-box" style="max-width:480px;max-height:70vh;overflow-y:auto;">
     <h2>⚙ Settings</h2>
     <div class="settings-list">
       <label class="settings-row">
@@ -207,13 +184,6 @@
           <div class="settings-row-desc">Plays after your first click on the page</div>
         </div>
       </label>
-      <label class="settings-row">
-        <input type="checkbox" id="set-scoring"/>
-        <div>
-          <div class="settings-row-label">Show scoring reference</div>
-          <div class="settings-row-desc">Route length point table</div>
-        </div>
-      </label>
     </div>
     {% if git_version_name %}
     <div style="margin-top:1rem;padding-top:0.6rem;border-top:1px solid var(--border);text-align:center;">
@@ -226,6 +196,59 @@
       </span>
     </div>
     {% endif %}
+  </div>
+</div>
+
+<div id="rules-modal" class="modal hidden">
+  <div class="modal-backdrop" id="rules-backdrop"></div>
+  <div class="modal-box" style="max-width:480px;max-height:70vh;overflow-y:auto;">
+    <button id="rules-close-btn" class="modal-close-btn" title="Close">✕</button>
+    <h2>How to Play</h2>
+    <div class="sidebar-label" style="margin-bottom:0.5rem;">ON YOUR TURN</div>
+    <div class="rules-list">
+      <div class="rules-row">Draw 2 cards <span class="rules-note">face-up or blind; locomotives are wild</span></div>
+      <div class="rules-row">Claim a route <span class="rules-note">play matching cards equal to route length</span></div>
+      <div class="rules-row">Draw 3 tickets <span class="rules-note">keep ≥2, return the rest</span></div>
+    </div>
+    {% if map_variant == 'europe' %}
+    <div class="sidebar-label" style="margin:0.9rem 0 0.5rem;">SPECIAL RULES</div>
+    <div class="rules-special">
+      <div class="rules-special-row">
+        <div class="rules-special-label">Tunnels</div>
+        <div class="rules-special-desc">Draw 3 blind cards. Pay 1 extra per matching card drawn — or forfeit the attempt.</div>
+      </div>
+      <div class="rules-special-row">
+        <div class="rules-special-label">Ferries</div>
+        <div class="rules-special-desc">Segments with a ship icon require locomotives. The number shown is how many.</div>
+      </div>
+      <div class="rules-special-row">
+        <div class="rules-special-label">Stations</div>
+        <div class="rules-special-desc">Place on a city to borrow one opponent route there for tickets. Costs 1/2/3 trains. Unused stations score +4 pts each.</div>
+      </div>
+      <div class="rules-special-row">
+        <div class="rules-special-label">Starting tickets</div>
+        <div class="rules-special-desc">Choose ≥2 from 1 long route + 3 short routes dealt at the start.</div>
+      </div>
+    </div>
+    {% endif %}
+    <div class="rules-endgame">End game triggers when any player reaches ≤2 trains. Each player gets one final turn.</div>
+    <div class="sidebar-label" style="margin:0.9rem 0 0.4rem;">ROUTE SCORING</div>
+    <div class="scoring-grid">
+      <div class="scoring-grid-row"><span class="sc-label">1 car</span><span class="sc-pts">1 pt</span></div>
+      <div class="scoring-grid-row"><span class="sc-label">2 cars</span><span class="sc-pts">2 pts</span></div>
+      <div class="scoring-grid-row"><span class="sc-label">3 cars</span><span class="sc-pts">4 pts</span></div>
+      <div class="scoring-grid-row"><span class="sc-label">4 cars</span><span class="sc-pts">7 pts</span></div>
+      <div class="scoring-grid-row"><span class="sc-label">5 cars</span><span class="sc-pts">10 pts</span></div>
+      <div class="scoring-grid-row"><span class="sc-label">6 cars</span><span class="sc-pts">15 pts</span></div>
+    </div>
+    <div class="scoring-bonuses" style="margin-top:0.5rem;">
+      <div class="scoring-bonus-row"><span class="sc-label">Ticket complete</span><span class="sc-pts sc-pos">+ pts</span></div>
+      <div class="scoring-bonus-row"><span class="sc-label">Ticket incomplete</span><span class="sc-pts sc-neg">− pts</span></div>
+      <div class="scoring-bonus-row"><span class="sc-label">Longest path</span><span class="sc-pts sc-pos">+10 pts</span></div>
+      {% if map_variant == 'europe' %}
+      <div class="scoring-bonus-row"><span class="sc-label">Unused station</span><span class="sc-pts sc-pos">+4 pts</span></div>
+      {% endif %}
+    </div>
   </div>
 </div>
 
@@ -302,5 +325,5 @@ const MAP_VARIANT   = "{{ map_variant }}";
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='js/game.js') }}"></script>
+<script src="{{ url_for('static', filename='js/game.js') }}?v={{ asset_version }}"></script>
 {% endblock %}

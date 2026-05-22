@@ -893,6 +893,8 @@ html, body {
 
 /* Ticket choices */
 .ticket-choices { display: flex; flex-direction: column; gap: 0.6rem; }
+.long-ticket-card { background: #0d1520; border-color: #1e3a5c; }
+.long-ticket-card.selected { border-color: #3b82f6; }
 .ticket-choice {
   display: flex;
   align-items: center;
@@ -1199,21 +1201,34 @@ html, body {
   border-bottom: none;
   padding: 0.5rem 0.9rem 1rem;
 }
+.settings-btn-row { display: flex; gap: 0.4rem; justify-content: center; }
 .settings-btn {
-  width: 100%;
-  padding: 0.45rem 0.7rem;
+  width: 2.2rem;
+  height: 2.2rem;
+  padding: 0;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: 6px;
   color: var(--text-muted);
-  font-family: 'Cinzel', serif;
-  font-size: 0.72rem;
-  letter-spacing: 0.08em;
+  font-size: 1rem;
   cursor: pointer;
   transition: border-color 0.15s, color 0.15s;
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .settings-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+/* ─── Rules modal content ───────────────────────────────────────────── */
+.rules-list { display: flex; flex-direction: column; gap: 0.3rem; margin-bottom: 0.5rem; }
+.rules-row { font-size: 0.75rem; color: var(--text); padding: 0.3rem 0; border-bottom: 1px solid var(--border); }
+.rules-row:last-child { border-bottom: none; }
+.rules-note { color: var(--text-muted); font-size: 0.68rem; display: block; margin-top: 1px; }
+.rules-special { display: flex; flex-direction: column; gap: 0.5rem; margin-bottom: 0.5rem; }
+.rules-special-row { display: flex; flex-direction: column; gap: 0.15rem; }
+.rules-special-label { font-size: 0.7rem; color: var(--gold); font-family: 'Cinzel', serif; letter-spacing: 0.05em; }
+.rules-special-desc { font-size: 0.7rem; color: var(--text-muted); line-height: 1.4; }
+.rules-endgame { font-size: 0.7rem; color: var(--text-muted); border-top: 1px solid var(--border); padding-top: 0.5rem; margin-top: 0.5rem; line-height: 1.4; }
 
 /* ─── Settings modal list ───────────────────────────────────────────── */
 .settings-list { display: flex; flex-direction: column; gap: 0; }
@@ -2288,7 +2303,7 @@ body.spectating #draw-blind-btn { display: none; }
   position: fixed;
   left: 0;
   bottom: 0;
-  width: 240px;
+  width: 262px;
   background: var(--bg-panel);
   border-top: 1px solid var(--border);
   border-right: 1px solid var(--border);

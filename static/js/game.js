@@ -9,6 +9,11 @@ let botPlayerIds = [];
 let pendingRouteId = null;
 let myChatName = IS_SPECTATOR ? SPECTATOR_NAME : '';
 
+// ─── Ticket modal state ───────────────────────────────────────────────────────
+let _ticketModalDismissed = false;   // true when user hit "View Board"
+let _dismissedForTicketKey = null;   // the ticket-ids key it was dismissed for
+let _ticketSelectionCache = null;    // { key, selected: Set } — preserved across close/reopen
+
 // ─── Transition tracking ──────────────────────────────────────────────────────
 let prevCurrentPlayerId = null;
 let prevPhase = null;
@@ -25,7 +30,6 @@ function _loadSetting(key, def) {
 }
 let soundEnabled        = _loadSetting('ttr_sounds', true);
 let yourTurnSoundEnabled = _loadSetting('ttr_your_turn_sound', true);
-let scoringVisible      = _loadSetting('ttr_scoring', true);
 let _gameOverSoundPlayed = false;
 let _gameOverDismissed = false;
 
@@ -238,9 +242,8 @@ const EUROPE_LABEL_OFFSETS = {
 };
 
 const CARD_ICON = {
-  pink: '<span style="display:inline-block;width:0.75em;height:0.75em;border-radius:50%;background:#ec4899;vertical-align:middle;"></span>',
-  blue: '🔵', orange: '🟠', white: '⚪',
-  green: '🟢', yellow: '🟡', black: '⚫', red: '🔴',
+  pink: '🚂', blue: '🚂', orange: '🚂', white: '🚂',
+  green: '🚂', yellow: '🚂', black: '🚂', red: '🚂',
   locomotive: '🚂',
 };
 const CARD_BG = {
@@ -605,7 +608,13 @@ function renderAll() {
     if (!hasPendingTickets()) closeModal('ticket-modal');
     return;
   }
-  if (hasPendingTickets()) openInitialTicketsModal();
+  if (hasPendingTickets()) {
+    const me2 = gameState.players[MY_PLAYER_ID];
+    const key = me2 && me2.pending_tickets
+      ? me2.pending_tickets.map(t => t.id).sort().join(',') : null;
+    if (_ticketModalDismissed && key && _dismissedForTicketKey === key) return;
+    openInitialTicketsModal();
+  }
 }
 
 // ─── Board SVG ───────────────────────────────────────────────────────────────
@@ -1106,8 +1115,17 @@ function renderStatusBar() {
   if (phase === 'initial_tickets') {
     const me = gameState.players[MY_PLAYER_ID];
     if (me && me.pending_tickets && me.pending_tickets.length > 0) {
-      bar.textContent = '⬆ Choose your starting destination tickets (keep at least 2)';
-      bar.style.color = '#f59e0b';
+      if (_ticketModalDismissed) {
+        bar.innerHTML = '🎫 Tickets waiting — <button id="reopen-tickets-btn" style="background:none;border:1px solid var(--gold);border-radius:4px;color:var(--gold);font-family:\'Cinzel\',serif;font-size:0.7rem;letter-spacing:0.06em;padding:0.1rem 0.5rem;cursor:pointer;">Choose</button>';
+        bar.style.color = '#f59e0b';
+        document.getElementById('reopen-tickets-btn')?.addEventListener('click', () => {
+          _ticketModalDismissed = false;
+          openInitialTicketsModal();
+        });
+      } else {
+        bar.textContent = '⬆ Choose your starting destination tickets (keep at least 2)';
+        bar.style.color = '#f59e0b';
+      }
     } else {
       bar.textContent = `Waiting for players to choose tickets…`;
       bar.style.color = 'var(--text-muted)';
@@ -1137,7 +1155,14 @@ function renderStatusBar() {
   }
 
   if (isMyTurn) {
-    if (stationPlacementMode) {
+    if (_ticketModalDismissed && hasPendingTickets()) {
+      bar.innerHTML = '🎫 Tickets waiting — <button id="reopen-tickets-btn" style="background:none;border:1px solid var(--gold);border-radius:4px;color:var(--gold);font-family:\'Cinzel\',serif;font-size:0.7rem;letter-spacing:0.06em;padding:0.1rem 0.5rem;cursor:pointer;">Choose</button>';
+      bar.style.color = '#f59e0b';
+      document.getElementById('reopen-tickets-btn')?.addEventListener('click', () => {
+        _ticketModalDismissed = false;
+        openInitialTicketsModal();
+      });
+    } else if (stationPlacementMode) {
       bar.textContent = '🏙 Click a city on the board to place your station (Esc to cancel)';
       bar.style.color = '#f59e0b';
     } else if (gameState.draw_step === 1) {
@@ -1158,8 +1183,9 @@ function renderActionButtons() {
   const isMyTurn = gameState.current_player_id === MY_PLAYER_ID;
   const drawingCards = gameState.draw_step > 0;
   const btn = document.getElementById('draw-tickets-btn');
-  btn.disabled = !isMyTurn || drawingCards;
-  btn.classList.toggle('active-turn', isMyTurn && !drawingCards);
+  const hasPending = hasPendingTickets();
+  btn.disabled = hasPending ? false : (!isMyTurn || drawingCards);
+  btn.classList.toggle('active-turn', hasPending || (isMyTurn && !drawingCards));
   document.getElementById('dest-count').textContent = gameState.dest_deck_count || 0;
 
   const blindBtn = document.getElementById('draw-blind-btn');
@@ -1224,6 +1250,11 @@ document.getElementById('draw-blind-btn').addEventListener('click', () => {
 
 document.getElementById('draw-tickets-btn').addEventListener('click', () => {
   if (!gameState) return;
+  if (hasPendingTickets()) {
+    _ticketModalDismissed = false;
+    openInitialTicketsModal();
+    return;
+  }
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   if (gameState.draw_step !== 0) return;
   socket.emit('draw_destination_tickets', { code: GAME_CODE });
@@ -1567,27 +1598,40 @@ function openInitialTicketsModal() {
   document.getElementById('ticket-modal-title').textContent =
     isInitial ? 'Choose Your Starting Tickets' : 'Keep Destination Tickets';
 
-  let descText = `Choose which tickets to keep (minimum ${minKeep}).`;
-  if (isInitial && isEurope && me.long_ticket_id) {
-    const longT = getTicketById(me.long_ticket_id);
-    const longName = longT ? `${longT.city1} → ${longT.city2} (${longT.points} pts)` : 'long ticket';
-    descText = `Your long ticket has been auto-kept: ${longName}. Keep at least ${minKeep} of the 3 short tickets below.`;
-  }
+  const longTicketId = (isInitial && isEurope) ? me.long_ticket_id : null;
+  let descText = isInitial && isEurope
+    ? `Keep at least ${minKeep} tickets. The blue card is your long route.`
+    : `Choose which tickets to keep (minimum ${minKeep}).`;
   document.getElementById('ticket-modal-desc').textContent = descText;
 
   const tickets = me.pending_tickets;
-  let selected = new Set();  // default: none selected
+  const ticketKey = tickets.map(t => t.id).sort().join(',');
+
+  // Clear dismissed flag if a new set of tickets arrived
+  if (_dismissedForTicketKey && _dismissedForTicketKey !== ticketKey) {
+    _ticketModalDismissed = false;
+    _dismissedForTicketKey = null;
+  }
+
+  // Preserve selection across close/reopen; reset only when tickets change
+  if (!_ticketSelectionCache || _ticketSelectionCache.key !== ticketKey) {
+    _ticketSelectionCache = { key: ticketKey, selected: new Set() };
+  }
+  let selected = _ticketSelectionCache.selected;
 
   function refreshTicketChoices() {
     const choicesEl = document.getElementById('ticket-choices');
-    choicesEl.innerHTML = tickets.map(t => `
-      <label class="ticket-choice ${selected.has(t.id) ? 'selected' : ''}" data-id="${t.id}">
+    choicesEl.innerHTML = tickets.map(t => {
+      const isLong = t.id === longTicketId;
+      return `
+      <label class="ticket-choice ${isLong ? 'long-ticket-card' : ''} ${selected.has(t.id) ? 'selected' : ''}" data-id="${t.id}">
         <div class="ticket-choice-check">${selected.has(t.id) ? '✓' : ''}</div>
         <div class="ticket-choice-info">
           <div class="ticket-choice-route">${escHtml(t.city1)} <span>→</span> ${escHtml(t.city2)}</div>
         </div>
         <div class="ticket-choice-pts">${t.points} pts</div>
-      </label>`).join('');
+      </label>`;
+    }).join('');
 
     choicesEl.querySelectorAll('.ticket-choice').forEach(el => {
       el.addEventListener('click', () => {
@@ -1613,6 +1657,14 @@ function openInitialTicketsModal() {
     } else {
       socket.emit('keep_drawn_tickets', { code: GAME_CODE, keep_ids: keepIds });
     }
+    _ticketModalDismissed = false;
+    _ticketSelectionCache = null;
+    closeModal('ticket-modal');
+  };
+
+  document.getElementById('ticket-view-board-btn').onclick = () => {
+    _ticketModalDismissed = true;
+    _dismissedForTicketKey = ticketKey;
     closeModal('ticket-modal');
   };
 
@@ -1748,22 +1800,11 @@ socket.on('all_tickets', (tickets) => {
 
 // ─── Settings modal ───────────────────────────────────────────────────────────
 
-function _applySettings() {
-  document.getElementById('scoring-section').style.display = scoringVisible ? '' : 'none';
-  const ticketsSection = document.getElementById('tickets-section');
-  if (ticketsSection) {
-    // When scoring reference is shown, shrink tickets to make room; when hidden, let them grow
-    ticketsSection.style.maxHeight = scoringVisible ? '30vh' : '55vh';
-  }
-}
-
 function openSettings() {
   const modal = document.getElementById('settings-modal');
-  // Sync checkboxes to current state
   document.getElementById('set-your-turn-sound').checked = yourTurnSoundEnabled;
   document.getElementById('set-sounds').checked          = soundEnabled;
   document.getElementById('set-music').checked           = musicEnabled;
-  document.getElementById('set-scoring').checked         = scoringVisible;
   modal.classList.remove('hidden');
 }
 
@@ -1790,14 +1831,16 @@ document.getElementById('set-music').addEventListener('change', e => {
   if (musicEnabled) { _loadAndPlayTrack(); } else { _musicAudio.pause(); }
 });
 
-document.getElementById('set-scoring').addEventListener('change', e => {
-  scoringVisible = e.target.checked;
-  localStorage.setItem('ttr_scoring', scoringVisible);
-  _applySettings();
+document.getElementById('rules-btn')?.addEventListener('click', () => {
+  document.getElementById('rules-modal').classList.remove('hidden');
+});
+document.getElementById('rules-backdrop')?.addEventListener('click', () => {
+  document.getElementById('rules-modal').classList.add('hidden');
+});
+document.getElementById('rules-close-btn')?.addEventListener('click', () => {
+  document.getElementById('rules-modal').classList.add('hidden');
 });
 
-// Apply persisted settings on load
-_applySettings();
 if (_loadSetting('ttr_music', false)) {
   musicEnabled = true;
 }

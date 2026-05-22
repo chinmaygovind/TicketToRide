@@ -4,20 +4,8 @@
 {% block body %}
 <div class="lobby-bg">
 
-  <!-- Minimal header -->
-  <div class="lobby-top-bar">
-    <a href="/lobbies" class="lobby-back-link">← Lobbies</a>
-    <div class="lobby-top-title">
-      <span class="lobby-title-text">TICKET TO RIDE</span>
-      {% if game.is_private %}
-      <span class="lobby-privacy-badge badge-private-pill">🔒 PRIVATE</span>
-      {% else %}
-      <span class="lobby-privacy-badge badge-public-pill">🌐 PUBLIC</span>
-      {% endif %}
-      <span class="lobby-map-badge">{% if game.map_variant == 'europe' %}🌍 EUROPE{% else %}🗺 NORTH AMERICA{% endif %}</span>
-    </div>
-    <div style="width:80px;"></div><!-- spacer -->
-  </div>
+  {% set active_page = 'lobbies' %}
+  {% include '_nav.html' %}
 
   <!-- Two-column grid -->
   <div class="lobby-grid">

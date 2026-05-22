@@ -65,6 +65,13 @@ import game_logic as logic
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 
+# Inject asset version into all templates for cache-busting
+_ASSET_VERSION = GIT_VERSION_NAME or 'dev'
+
+@app.context_processor
+def inject_asset_version():
+    return {'asset_version': _ASSET_VERSION}
+
 DATABASE_URL = os.environ.get("DATABASE_URL", "")
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)

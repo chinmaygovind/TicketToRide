@@ -82,15 +82,16 @@ def init_game_state(players: list[dict], map_variant: str = "usa") -> dict:
 
     # Deal initial destination tickets
     if is_europe:
-        # Each player gets 1 long (mandatory, auto-kept) + 3 short (keep ≥2)
+        # Each player gets 1 long + 3 short as pending choices; must keep ≥2
         for p in players:
             pid = str(p["id"])
+            pending = []
             if long_tickets:
                 long_id = long_tickets.pop()
-                player_states[pid]["tickets"].append(long_id)   # auto-kept
-                player_states[pid]["long_ticket_id"] = long_id  # remember which one
-            drawn_short = [dest_deck.pop() for _ in range(min(3, len(dest_deck)))]
-            player_states[pid]["pending_tickets"] = drawn_short
+                player_states[pid]["long_ticket_id"] = long_id
+                pending.append(long_id)
+            pending += [dest_deck.pop() for _ in range(min(3, len(dest_deck)))]
+            player_states[pid]["pending_tickets"] = pending
     else:
         for p in players:
             pid = str(p["id"])
@@ -159,6 +160,9 @@ def keep_initial_tickets(state: dict, player_id: str, keep_ids: list[int]) -> di
     returned = [t for t in pending if t not in keep_ids]
     state["dest_deck"] = returned + state["dest_deck"]
     ps["pending_tickets"] = []
+    # If the long ticket was discarded, clear its marker
+    if ps.get("long_ticket_id") and ps["long_ticket_id"] not in keep_ids:
+        ps["long_ticket_id"] = None
 
     _advance_initial_tickets(state)
     return {"ok": True}
