@@ -787,25 +787,22 @@ function renderBoard() {
 
     }
 
-    // Tunnel indicator: solid black outline on each segment
+    // Tunnel indicator: zigzag outline on each segment
     if (route.tunnel && !claimedBy && !isClosed) {
       for (const seg of segments) {
-        const outline = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        outline.setAttribute('x', seg.x - 1);
-        outline.setAttribute('y', seg.y - 1);
-        outline.setAttribute('width', seg.w + 2);
-        outline.setAttribute('height', seg.h + 2);
+        const outline = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        outline.setAttribute('d', _tunnelZigzag(seg.cx, seg.cy, seg.w, seg.h));
         outline.setAttribute('transform', `rotate(${seg.angle}, ${seg.cx}, ${seg.cy})`);
-        outline.setAttribute('rx', '3');
         outline.setAttribute('fill', 'none');
-        outline.setAttribute('stroke', 'rgba(0,0,0,0.75)');
-        outline.setAttribute('stroke-width', '1.5');
+        outline.setAttribute('stroke', 'rgba(0,0,0,0.8)');
+        outline.setAttribute('stroke-width', '1.2');
+        outline.setAttribute('stroke-linejoin', 'miter');
         outline.setAttribute('pointer-events', 'none');
         svg.appendChild(outline);
       }
     }
 
-    // Ferry indicator: train icon on specific segments
+    // Ferry indicator: black train icon on specific segments
     if (route.ferry_segments && !claimedBy && !isClosed) {
       for (const segIdx of route.ferry_segments) {
         const seg = segments[segIdx];
@@ -814,13 +811,10 @@ function renderBoard() {
         locoIcon.setAttribute('x', seg.cx);
         locoIcon.setAttribute('y', seg.cy);
         locoIcon.setAttribute('font-size', '7');
-        locoIcon.setAttribute('fill', '#111');
-        locoIcon.setAttribute('stroke', 'rgba(255,255,255,0.6)');
-        locoIcon.setAttribute('stroke-width', '1.5');
-        locoIcon.setAttribute('paint-order', 'stroke');
         locoIcon.setAttribute('text-anchor', 'middle');
         locoIcon.setAttribute('dominant-baseline', 'middle');
         locoIcon.setAttribute('pointer-events', 'none');
+        locoIcon.style.filter = 'brightness(0)';
         locoIcon.textContent = '🚂';
         svg.appendChild(locoIcon);
       }
@@ -907,6 +901,32 @@ function renderBoard() {
     text.textContent = cityName;
     svg.appendChild(text);
   }
+}
+
+function _tunnelZigzag(cx, cy, w, h) {
+  const W = w + 2, H = h + 2;
+  const spike = 2.5, step = 5;
+  const L = cx - W / 2, R = cx + W / 2;
+  const T = cy - H / 2, B = cy + H / 2;
+  const f = n => n.toFixed(1);
+  const pts = [[L, T]];
+  for (let x = L; x < R - 0.1; x += step) {
+    const m = Math.min(x + step / 2, R);
+    pts.push([m, T - spike]);
+    const m2 = Math.min(m + step / 2, R);
+    pts.push([m2, T]);
+    if (m2 >= R - 0.1) break;
+  }
+  pts.push([R, T], [R, B]);
+  for (let x = R; x > L + 0.1; x -= step) {
+    const m = Math.max(x - step / 2, L);
+    pts.push([m, B + spike]);
+    const m2 = Math.max(m - step / 2, L);
+    pts.push([m2, B]);
+    if (m2 <= L + 0.1) break;
+  }
+  pts.push([L, B]);
+  return 'M ' + pts.map(([px, py]) => `${f(px)},${f(py)}`).join(' L ') + ' Z';
 }
 
 function buildRouteSegments(p1, p2, length, side, color) {
@@ -1618,6 +1638,7 @@ function openInitialTicketsModal() {
       <label class="ticket-choice ${isLong ? 'long-ticket-card' : ''} ${selected.has(t.id) ? 'selected' : ''}" data-id="${t.id}">
         <div class="ticket-choice-check">${selected.has(t.id) ? '✓' : ''}</div>
         <div class="ticket-choice-info">
+          ${isLong ? '<div class="ticket-long-badge">LONG ROUTE</div>' : ''}
           <div class="ticket-choice-route">${escHtml(t.city1)} <span>→</span> ${escHtml(t.city2)}</div>
         </div>
         <div class="ticket-choice-pts">${t.points} pts</div>

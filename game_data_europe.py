@@ -167,6 +167,8 @@ EUROPE_ROUTES = [
     {"id":184,"city1":"Kyiv",         "city2":"Kharkov",       "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":186,"city1":"Kyiv",         "city2":"Smolensk",      "length":3,"color":"red",   "double_group":None,          "side":0,"tunnel":False,"ferry":0},
     {"id":187,"city1":"Kharkov",      "city2":"Rostov",        "length":2,"color":"green", "double_group":None,          "side":0,"tunnel":False,"ferry":0},
+    {"id":219,"city1":"Rostov",       "city2":"Sochi",         "length":2,"color":"yellow","double_group":None,          "side":0,"tunnel":False,"ferry":0},
+    {"id":220,"city1":"Rostov",       "city2":"Sevastopol",    "length":4,"color":"gray",  "double_group":None,          "side":0,"tunnel":False,"ferry":0},
 
     # ── Balkans & Eastern Europe ─────────────────────────────────────────────
     {"id":188,"city1":"Sarajevo",     "city2":"Sofia",         "length":2,"color":"gray",  "double_group":None,          "side":0,"tunnel":True, "ferry":0},

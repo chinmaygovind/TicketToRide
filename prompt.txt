@@ -1,0 +1,10 @@
+
+also completely get rid of hte request undo feature.
+ok also ferries shouldn't be marked with this train symbol x1 thing. instead, specific segments along that route should be marked with a black train symbol. 
+these are: dieppe to london (first one), london to amsterdam (both the 2 segments), essen to kobenhavn (first one), sevastopol to erzurum (first two), sevastopol to constantinople (first two), sevastopol to sochi (first one), athina to smyrna (first one) [oh fuck we're missing a route from athina to smyrna help me add it its 2 gray segments), smyrna to palermo (first 2 segments), palermo to brindisa (first segment), palermo to roma (first segment), brindisa to athina (first segment).
+then, tunnels should be marked on the board with a solid black outline along the route segments.
+also place station button doesn't work. when you click "view board" to hide the destination tickets window, there should be a way to reopen the destination tickets window (like some small button should appear so you can reopen it but it doesnt block the view of the board). also add support for length 7 routes (18 pts) and length 8 routes (21 pts).
+
+finally, make an admin page that only the user "chinmay" can access with /admin (no need to add any buttons to it i'll just access that page) and on that page just basically make a way for me to look at all the entries in the database in all the tables (all users, games, etc) and see and view and modify the entries like a basic dbms.
+make no mistakes, read my mind.
+

@@ -484,12 +484,9 @@ def resolve_tunnel(state: dict, player_id: str, proceed: bool, extra_cards: dict
             return {"ok": False, "error": f"Not enough {c} cards for extra cost."}
 
     state["pending_tunnel"] = None
-    # Deduct extra cards from hand
-    for c, n in extra_cards.items():
-        ps["hand"][c] -= n
-        if ps["hand"][c] <= 0:
-            ps["hand"].pop(c, None)
-    state["discard"].extend(_expand_cards(extra_cards))
+    # Return offered cards so _apply_claim can deduct everything in one pass
+    for color, count in offered.items():
+        ps["hand"][color] = ps["hand"].get(color, 0) + count
 
     all_used = dict(offered)
     for c, n in extra_cards.items():
