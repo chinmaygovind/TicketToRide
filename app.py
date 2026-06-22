@@ -256,6 +256,13 @@ def _google_get(url: str, token: str) -> dict:
 # HTTP Routes — Auth
 # ---------------------------------------------------------------------------
 
+@app.route("/sw.js")
+def service_worker():
+    from flask import send_from_directory
+    return send_from_directory(app.static_folder, "sw.js",
+                               mimetype="application/javascript")
+
+
 @app.route("/")
 def index():
     if get_current_user() or session.get("guest_name"):
@@ -787,6 +794,20 @@ def admin_delete(table_name, row_id):
 @require_login
 def lobbies():
     user = get_current_user()
+
+    # Redirect back into any active game this session is already part of
+    sk = get_session_key()
+    active = (Player.query
+              .filter_by(session_key=sk)
+              .join(Game, Game.id == Player.game_id)
+              .filter(Game.status.in_(["playing", "waiting"]))
+              .first())
+    if active:
+        if active.game.status == "playing":
+            return redirect(url_for("game_page", code=active.game.code))
+        else:
+            return redirect(url_for("lobby", code=active.game.code))
+
     guest_name = session.get("guest_name") if not user else None
     public_games = (Game.query
                     .filter_by(status="waiting", is_private=False)
@@ -864,9 +885,19 @@ def join_game_http():
 
     sk = get_session_key()
 
+    # Already in the game by session key
     existing = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if existing:
         return jsonify({"ok": True, "code": code})
+
+    # Same user in a different tab/browser — update session key instead of creating a duplicate player
+    join_user = get_current_user()
+    if join_user:
+        existing_by_user = Player.query.filter_by(game_id=game.id, user_id=join_user.id).first()
+        if existing_by_user:
+            existing_by_user.session_key = sk
+            db.session.commit()
+            return jsonify({"ok": True, "code": code})
 
     if len(game.players) >= game.max_players:
         return jsonify({"ok": False, "error": "Game is full."}), 400
@@ -876,7 +907,6 @@ def join_game_http():
     if not available:
         return jsonify({"ok": False, "error": "No colors available."}), 400
 
-    join_user = get_current_user()
     player = Player(
         game_id=game.id,
         user_id=join_user.id if join_user else None,
@@ -899,6 +929,14 @@ def lobby(code):
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
     if not player:
+        # Reconnect: look up by user_id and refresh session key
+        user = get_current_user()
+        if user:
+            player = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
+            if player:
+                player.session_key = get_session_key()
+                db.session.commit()
+    if not player:
         return redirect(url_for("lobbies"))
     if game.status == "playing":
         return redirect(url_for("game_page", code=code.upper()))
@@ -911,6 +949,12 @@ def game_page(code):
     user = get_current_user()
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
+    if not player and user:
+        # Reconnect: look up by user_id and refresh session key so broadcasts reach this client
+        player = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
+        if player:
+            player.session_key = get_session_key()
+            db.session.commit()
     is_spectator = player is None
     if game.status == "waiting":
         if player:
@@ -1478,7 +1522,7 @@ def on_get_all_tickets(data=None):
 
 def _stale_game_cleanup():
     PLAYING_LIMIT = timedelta(minutes=20)
-    WAITING_LIMIT = timedelta(hours=2)
+    WAITING_LIMIT = timedelta(minutes=30)
 
     def _run_cleanup():
         with app.app_context():

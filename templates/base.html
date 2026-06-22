@@ -4,6 +4,15 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>{% block title %}Ticket to Ride{% endblock %}</title>
+  <!-- PWA -->
+  <link rel="manifest" href="/static/manifest.json"/>
+  <meta name="theme-color" content="#1a1210"/>
+  <meta name="mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="apple-mobile-web-app-title" content="Ticket to Ride"/>
+  <link rel="apple-touch-icon" href="/static/images/icon.svg"/>
+  <!-- Fonts & styles -->
   <link rel="preconnect" href="https://fonts.googleapis.com"/>
   <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet"/>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v={{ asset_version }}"/>
@@ -13,5 +22,10 @@
   {% block body %}{% endblock %}
   <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
   {% block scripts %}{% endblock %}
+  <script>
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js', { scope: '/' }).catch(() => {});
+    }
+  </script>
 </body>
 </html>

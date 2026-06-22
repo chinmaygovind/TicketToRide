@@ -1,0 +1,41 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: SSH deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          # Secrets EC2_APP_PATH and EC2_SERVICE are passed as env vars into the script
+          envs: EC2_APP_PATH,EC2_SERVICE
+          script: |
+            set -e
+
+            echo "==> Switching to app directory"
+            cd "$EC2_APP_PATH"
+
+            echo "==> Pulling latest from main"
+            git fetch origin main
+            git checkout main 2>/dev/null || true
+            git reset --hard origin/main
+
+            echo "==> Installing/upgrading Python dependencies"
+            pip3 install -q -r requirements.txt
+
+            echo "==> Restarting service (brief WebSocket reconnect expected)"
+            sudo systemctl restart "$EC2_SERVICE"
+
+            echo "==> Deploy complete"
+        env:
+          EC2_APP_PATH: ${{ secrets.EC2_APP_PATH }}
+          EC2_SERVICE: ${{ secrets.EC2_SERVICE }}

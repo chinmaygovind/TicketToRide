@@ -124,13 +124,25 @@ function _loadAndPlayTrack() {
   _musicAudio.play().catch(() => {});
 }
 
-// First-click handler: unlock AudioContext and start music if it was enabled
-document.addEventListener('click', function _firstGestureHandler() {
+// First user gesture: unlock AudioContext and start music.
+// Listen on both click and touchstart so mobile users don't need two taps.
+function _onFirstGesture() {
   _unlockAudio();
   if (musicEnabled && _musicQueue.length && !_musicAudio.src) {
     _loadAndPlayTrack();
   }
-}, { once: true });
+}
+['click', 'touchstart'].forEach(evt =>
+  document.addEventListener(evt, _onFirstGesture, { once: true, passive: true })
+);
+
+// iOS suspends AudioContext when the page goes to background; resume on any gesture.
+function _keepAudioAlive() {
+  if (_audioCtx && _audioCtx.state === 'suspended') _audioCtx.resume().catch(() => {});
+}
+['click', 'touchstart'].forEach(evt =>
+  document.addEventListener(evt, _keepAudioAlive, { passive: true })
+);
 
 // ─── Toast notifications ──────────────────────────────────────────────────────
 function showToast(msg, color = '#f59e0b', duration = 4000) {
@@ -372,6 +384,18 @@ socket.on('game_state', (state) => {
   prevPhase = state.phase;
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
 
+  // Detect 3-loco sweep BEFORE overwriting gameState so we can capture the old face_up.
+  // game_state always arrives before game_state_update (same connection, emitted in order),
+  // so sweep animation must be triggered here or it will never fire for the active player.
+  const _oldFaceUp = gameState ? [...(gameState.face_up || [])] : [];
+  const _newFaceUp = state.face_up || [];
+  const _sweepChanges = _oldFaceUp.filter((c, i) => c !== _newFaceUp[i]).length;
+  const _doSweep = gameState && !_sweepInProgress && _sweepChanges >= 5 && _oldFaceUp.length === 5;
+  if (_doSweep) {
+    state.face_up = _oldFaceUp; // Keep old cards in state so animation has a "from" state
+    _sweepInProgress = true;
+  }
+
   // Animate my blind draw with the real card color now that the server has told us what it was
   if (pendingBlindDraw !== null) {
     const newHand = state.players?.[MY_PLAYER_ID]?.hand || {};
@@ -391,6 +415,8 @@ socket.on('game_state', (state) => {
     myChatName = state.players[MY_PLAYER_ID].name;
   }
   renderAll();
+
+  if (_doSweep) _runSweepAnimation(_newFaceUp);
 });
 
 socket.on('game_state_update', (state) => {
@@ -452,49 +478,13 @@ socket.on('game_state_update', (state) => {
   prevCurrentPlayerId = newCurrentPlayer;
   prevPhase = newPhase;
 
-  if (isSweep) {
-    // Block renderFaceUpCards during sweep so OLD cards stay in DOM with their
-    // already-painted position — they become our animation "from" state.
-    _sweepInProgress = true;
-  }
+  // Only run the animation if game_state hasn't already started it (it always arrives first)
+  const doSweep = isSweep && !_sweepInProgress;
+  if (isSweep) _sweepInProgress = true; // block renderFaceUpCards regardless
 
   renderAll();
 
-  if (isSweep) {
-    const area = document.getElementById('face-up-cards');
-    const cards = [...area.querySelectorAll('.train-card')];
-
-    // Force a layout flush so the browser commits the current painted position
-    // of each card before we apply transitions (getBoundingClientRect triggers reflow).
-    cards.forEach(c => c.getBoundingClientRect());
-
-    // Slide old cards out to the left
-    cards.forEach((card, i) => {
-      card.style.transition = `transform 0.28s ease ${i * 0.06}s, opacity 0.28s ease ${i * 0.06}s`;
-      card.style.transform = 'translateX(-160px)';
-      card.style.opacity = '0';
-    });
-
-    const exitDuration = 280 + (cards.length - 1) * 60 + 60;
-    setTimeout(() => {
-      gameState.face_up = newFaceUp;
-      _sweepInProgress = false;
-      renderFaceUpCards();
-
-      // Slide new cards in from the right
-      area.querySelectorAll('.train-card').forEach((card, i) => {
-        card.style.transition = 'none';
-        card.style.transform = 'translateX(80px)';
-        card.style.opacity = '0';
-        // Double rAF ensures browser paints the offset position before animating
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          card.style.transition = `transform 0.25s ease ${i * 0.05}s, opacity 0.25s ease ${i * 0.05}s`;
-          card.style.transform = '';
-          card.style.opacity = '';
-        }));
-      });
-    }, exitDuration);
-  }
+  if (doSweep) _runSweepAnimation(newFaceUp);
 });
 
 socket.on('error', (data) => {
@@ -576,6 +566,42 @@ function animateFromActionLog(log) {
       animateCardToPlayerRow(pid, 'draw-blind-btn', 'unknown');
     }
   }
+}
+
+// ─── Sweep animation (3-locomotive deck reset) ────────────────────────────────
+
+function _runSweepAnimation(newFaceUp) {
+  // _sweepInProgress is already true when this is called; we own the animation.
+  const area = document.getElementById('face-up-cards');
+  const cards = [...area.querySelectorAll('.train-card')];
+
+  // Flush layout so each card's current painted position is committed before
+  // we apply transitions (getBoundingClientRect triggers reflow).
+  cards.forEach(c => c.getBoundingClientRect());
+
+  cards.forEach((card, i) => {
+    card.style.transition = `transform 0.28s ease ${i * 0.06}s, opacity 0.28s ease ${i * 0.06}s`;
+    card.style.transform = 'translateX(-160px)';
+    card.style.opacity = '0';
+  });
+
+  const exitDuration = 280 + (cards.length - 1) * 60 + 60;
+  setTimeout(() => {
+    gameState.face_up = newFaceUp;
+    _sweepInProgress = false;
+    renderFaceUpCards();
+
+    area.querySelectorAll('.train-card').forEach((card, i) => {
+      card.style.transition = 'none';
+      card.style.transform = 'translateX(80px)';
+      card.style.opacity = '0';
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        card.style.transition = `transform 0.25s ease ${i * 0.05}s, opacity 0.25s ease ${i * 0.05}s`;
+        card.style.transform = '';
+        card.style.opacity = '';
+      }));
+    });
+  }, exitDuration);
 }
 
 // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -1243,6 +1269,7 @@ function renderActionButtons() {
 
 function onDrawFaceUp(slot, sourceEl) {
   if (!gameState) return;
+  if (_sweepInProgress) return; // block clicks while sweep animation plays
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   if (gameState.phase !== 'main' && gameState.phase !== 'final_round') return;
   const color = gameState.face_up[slot];

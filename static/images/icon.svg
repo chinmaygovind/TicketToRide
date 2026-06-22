@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Background -->
+  <rect width="512" height="512" fill="#1a1210" rx="72"/>
+  <!-- Rails -->
+  <rect x="36" y="382" width="440" height="12" fill="#8B6914" rx="6"/>
+  <rect x="36" y="406" width="440" height="12" fill="#8B6914" rx="6"/>
+  <rect x="64"  y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="128" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="192" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="256" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="320" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="384" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <rect x="434" y="376" width="14" height="48" fill="#6B4F10" rx="3"/>
+  <!-- Smokestack -->
+  <rect x="128" y="156" width="34" height="84" fill="#c8a84b" rx="5"/>
+  <rect x="114" y="148" width="62" height="18" fill="#c8a84b" rx="5"/>
+  <!-- Boiler (main body lower) -->
+  <rect x="68" y="250" width="300" height="80" fill="#b8923a" rx="10"/>
+  <!-- Boiler highlight -->
+  <rect x="68" y="250" width="300" height="32" fill="#c8a84b" rx="10"/>
+  <!-- Cab body -->
+  <rect x="318" y="178" width="126" height="152" fill="#c8a84b" rx="8"/>
+  <!-- Cab windows -->
+  <rect x="334" y="198" width="38" height="30" fill="#1a1210" rx="4"/>
+  <rect x="388" y="198" width="38" height="30" fill="#1a1210" rx="4"/>
+  <!-- Cab door window -->
+  <rect x="356" y="246" width="52" height="62" fill="#2a2018" rx="4"/>
+  <!-- Front cowcatcher -->
+  <polygon points="46,280 68,250 68,330 46,340" fill="#a07828"/>
+  <!-- Wheels (large drive wheels) -->
+  <circle cx="152" cy="352" r="40" fill="#c8a84b"/>
+  <circle cx="152" cy="352" r="20" fill="#1a1210"/>
+  <circle cx="152" cy="352" r="6"  fill="#c8a84b"/>
+  <circle cx="252" cy="352" r="40" fill="#c8a84b"/>
+  <circle cx="252" cy="352" r="20" fill="#1a1210"/>
+  <circle cx="252" cy="352" r="6"  fill="#c8a84b"/>
+  <!-- Rear wheels (under cab) -->
+  <circle cx="360" cy="356" r="32" fill="#c8a84b"/>
+  <circle cx="360" cy="356" r="16" fill="#1a1210"/>
+  <circle cx="360" cy="356" r="5"  fill="#c8a84b"/>
+  <circle cx="430" cy="356" r="32" fill="#c8a84b"/>
+  <circle cx="430" cy="356" r="16" fill="#1a1210"/>
+  <circle cx="430" cy="356" r="5"  fill="#c8a84b"/>
+  <!-- Connecting rod -->
+  <rect x="120" y="344" width="255" height="10" fill="#a07828" rx="5"/>
+  <!-- Steam puff -->
+  <circle cx="145" cy="118" r="22" fill="#5a4a3a" opacity="0.7"/>
+  <circle cx="168" cy="98"  r="18" fill="#5a4a3a" opacity="0.5"/>
+  <circle cx="155" cy="80"  r="14" fill="#5a4a3a" opacity="0.35"/>
+</svg>
