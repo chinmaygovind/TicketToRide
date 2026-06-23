@@ -189,7 +189,7 @@ def _score_routes_weighted(state, pid, route_by_id, ticket_by_id, length_weights
             continue
         total_trains = sum(route_by_id[r]["length"] for r in unowned)
         for rid in unowned:
-            scores[rid] += ticket_weight * ticket["value"] / max(total_trains, 1)
+            scores[rid] += ticket_weight * ticket["points"] / max(total_trains, 1)
 
     return scores
 
@@ -526,7 +526,7 @@ def bot_keep_initial_tickets(state: dict, pid: str, pending: list,
     for tid in pending:
         t = ticket_by_id.get(tid)
         if t and _dijkstra(adj, t["city1"], t["city2"]) is not None:
-            keepable.append((t.get("value", 0), tid))
+            keepable.append((t.get("points", 0), tid))
         else:
             blocked.append(tid)
 
