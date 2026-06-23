@@ -64,6 +64,7 @@ import game_logic as logic
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
 
 # Inject asset version into all templates for cache-busting
 _ASSET_VERSION = GIT_VERSION_NAME or 'dev'
@@ -276,7 +277,9 @@ def login_page():
         return redirect(url_for("lobbies"))
     google_setup = bool(request.args.get("google_setup"))
     return render_template("login.html", google_enabled=GOOGLE_ENABLED,
-                           google_setup=google_setup)
+                           google_setup=google_setup,
+                           git_version_name=GIT_VERSION_NAME,
+                           git_commit_url=GIT_COMMIT_URL)
 
 
 @app.route("/login", methods=["POST"])
@@ -296,6 +299,7 @@ def login():
     if not user or not user.check_password(password):
         return jsonify({"ok": False, "error": "Invalid username or password."}), 401
 
+    session.permanent = True
     session["user_id"] = user.id
     return jsonify({"ok": True})
 
@@ -330,6 +334,7 @@ def register():
     db.session.add(user)
     db.session.commit()
 
+    session.permanent = True
     session["user_id"] = user.id
     return jsonify({"ok": True})
 
@@ -514,6 +519,7 @@ def google_callback():
             }
             return redirect(url_for("login_page", google_setup=1))
 
+    session.permanent = True
     session["user_id"] = user.id
     return redirect(url_for("lobbies"))
 
@@ -537,6 +543,7 @@ def google_setup():
     db.session.commit()
 
     session.pop("pending_google", None)
+    session.permanent = True
     session["user_id"] = user.id
     return jsonify({"ok": True})
 
@@ -820,9 +827,7 @@ def lobbies():
     notify = user.notify_new_game if user else False
     return render_template("lobbies.html", user=user, guest_name=guest_name,
                            games=public_games, ongoing_games=ongoing_games,
-                           notify_new_game=notify,
-                           git_version_name=GIT_VERSION_NAME,
-                           git_commit_url=GIT_COMMIT_URL)
+                           notify_new_game=notify)
 
 
 @app.route("/create", methods=["POST"])

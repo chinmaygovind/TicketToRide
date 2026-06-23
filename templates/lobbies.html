@@ -81,18 +81,6 @@
   </div>
 </div>
 
-{% if git_version_name %}
-<div style="position:fixed;bottom:0.75rem;left:1rem;z-index:10;">
-  <span style="font-size:0.65rem;color:var(--text-muted);font-family:'Cinzel',serif;letter-spacing:0.08em;">
-    Playing version
-    <a href="{{ git_commit_url }}" target="_blank" rel="noopener"
-       style="color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(200,168,75,0.35);transition:border-color 0.15s;"
-       onmouseover="this.style.borderBottomColor='var(--gold)'"
-       onmouseout="this.style.borderBottomColor='rgba(200,168,75,0.35)'">{{ git_version_name }}</a>
-  </span>
-</div>
-{% endif %}
-
 <!-- Create game modal -->
 <div class="create-modal-overlay" id="create-modal">
   <div class="create-modal-backdrop" id="create-backdrop"></div>
