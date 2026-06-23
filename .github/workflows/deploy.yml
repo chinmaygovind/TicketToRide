@@ -16,26 +16,22 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          # Secrets EC2_APP_PATH and EC2_SERVICE are passed as env vars into the script
-          envs: EC2_APP_PATH,EC2_SERVICE
           script: |
             set -e
 
-            echo "==> Switching to app directory"
-            cd "$EC2_APP_PATH"
+            APP=/home/ubuntu/TicketToRide
+            SERVICE=${{ secrets.EC2_SERVICE }}
 
             echo "==> Pulling latest from main"
+            cd "$APP"
             git fetch origin main
             git checkout main 2>/dev/null || true
             git reset --hard origin/main
 
             echo "==> Installing/upgrading Python dependencies"
-            pip3 install -q -r requirements.txt
+            "$APP/venv/bin/pip" install -q -r requirements.txt
 
             echo "==> Restarting service (brief WebSocket reconnect expected)"
-            sudo systemctl restart "$EC2_SERVICE"
+            sudo systemctl restart "$SERVICE"
 
             echo "==> Deploy complete"
-        env:
-          EC2_APP_PATH: ${{ secrets.EC2_APP_PATH }}
-          EC2_SERVICE: ${{ secrets.EC2_SERVICE }}
