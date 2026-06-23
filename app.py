@@ -820,7 +820,9 @@ def lobbies():
     notify = user.notify_new_game if user else False
     return render_template("lobbies.html", user=user, guest_name=guest_name,
                            games=public_games, ongoing_games=ongoing_games,
-                           notify_new_game=notify)
+                           notify_new_game=notify,
+                           git_version_name=GIT_VERSION_NAME,
+                           git_commit_url=GIT_COMMIT_URL)
 
 
 @app.route("/create", methods=["POST"])
