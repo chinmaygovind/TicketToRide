@@ -2474,3 +2474,14 @@ body.spectating #draw-blind-btn { display: none; }
     background: rgba(239,68,68,0.08) !important;
   }
 }
+
+/* Leave confirm modal danger button */
+.leave-confirm-ok-btn {
+  background: rgba(239,68,68,0.12);
+  border: 1px solid rgba(239,68,68,0.5);
+  color: #ef4444;
+}
+.leave-confirm-ok-btn:hover:not(:disabled) {
+  background: rgba(239,68,68,0.22);
+  border-color: #ef4444;
+}

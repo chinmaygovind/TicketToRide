@@ -1910,8 +1910,19 @@ document.getElementById('rules-btn-mobile')?.addEventListener('click', () => {
 });
 
 document.getElementById('leave-game-btn')?.addEventListener('click', () => {
-  if (!confirm('Leave and resign from this game? Your turns will be skipped for the rest of the game.')) return;
-  socket.emit('resign_game', { code: GAME_CODE });
+  document.getElementById('leave-confirm-modal').classList.remove('hidden');
+});
+document.getElementById('leave-confirm-cancel')?.addEventListener('click', () => {
+  document.getElementById('leave-confirm-modal').classList.add('hidden');
+});
+document.getElementById('leave-confirm-backdrop')?.addEventListener('click', () => {
+  document.getElementById('leave-confirm-modal').classList.add('hidden');
+});
+document.getElementById('leave-confirm-ok')?.addEventListener('click', async () => {
+  const btn = document.getElementById('leave-confirm-ok');
+  btn.disabled = true;
+  btn.textContent = 'Leaving…';
+  await fetch(`/resign/${GAME_CODE}`, { method: 'POST' });
   window.location.href = '/lobbies';
 });
 
