@@ -1652,17 +1652,41 @@ def _run_bots(game: Game, code: str):
                 db.session.commit()
                 continue
 
-            # Bot takes its first action
-            action, params = bot_module.bot_turn(state, cur_pid, personality)
+            draw_step = state.get("draw_step", 0)
+
+            # If we're stuck mid-draw (draw_step=1), just do the second draw and move on
+            if draw_step == 1:
+                logic.draw_blind(state, cur_pid)
+                game.state = state
+                db.session.commit()
+                continue
+
+            try:
+                action, params = bot_module.bot_turn(state, cur_pid, personality)
+            except Exception as e:
+                app.logger.error(f"bot_turn error ({personality}): {e}")
+                action, params = "draw_blind", {}
+
+            def _do_second_draw():
+                """Complete the second draw, falling back to blind on any failure."""
+                try:
+                    action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
+                except Exception:
+                    action2 = "draw_blind"
+                    params2 = {}
+                if action2 == "draw_face_up":
+                    r2 = logic.draw_face_up(state, cur_pid, params2["slot"])
+                    if not r2.get("ok"):
+                        logic.draw_blind(state, cur_pid)  # fallback
+                else:
+                    logic.draw_blind(state, cur_pid)
 
             if action == "claim":
                 logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
-                # Turn ends after claiming; tunnel resolution handled next iteration if needed
 
             elif action == "draw_tickets":
                 result = logic.draw_destination_tickets(state, cur_pid)
                 if result.get("ok"):
-                    # Immediately keep all drawn tickets (bots keep everything reachable)
                     ps = state["player_states"].get(cur_pid, {})
                     pending = ps.get("pending_tickets", [])
                     keep = bot_module.bot_keep_initial_tickets(state, cur_pid, pending, personality)
@@ -1671,20 +1695,17 @@ def _run_bots(game: Game, code: str):
             elif action == "draw_face_up":
                 result = logic.draw_face_up(state, cur_pid, params["slot"])
                 if result.get("ok"):
-                    action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
-                    if action2 == "draw_face_up":
-                        logic.draw_face_up(state, cur_pid, params2["slot"])
-                    else:
-                        logic.draw_blind(state, cur_pid)
+                    _do_second_draw()
+                else:
+                    # Face-up draw failed; fall back to blind draw
+                    result2 = logic.draw_blind(state, cur_pid)
+                    if result2.get("ok"):
+                        _do_second_draw()
 
             else:  # draw_blind
                 result = logic.draw_blind(state, cur_pid)
                 if result.get("ok"):
-                    action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
-                    if action2 == "draw_face_up":
-                        logic.draw_face_up(state, cur_pid, params2["slot"])
-                    else:
-                        logic.draw_blind(state, cur_pid)
+                    _do_second_draw()
 
             game.state = state
             db.session.commit()
