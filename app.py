@@ -997,13 +997,12 @@ def lobby(code):
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
     if not player:
-        # Reconnect: look up by user_id and refresh session key
         user = get_current_user()
         if user:
-            player = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
-            if player:
-                player.session_key = get_session_key()
-                db.session.commit()
+            existing = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
+            if existing:
+                # Same account but different session (second device) — block, don't steal the slot
+                return redirect(url_for("lobbies"))
     if not player:
         return redirect(url_for("lobbies"))
     if game.status == "playing":
@@ -1020,11 +1019,10 @@ def game_page(code):
     game = Game.query.filter_by(code=code.upper()).first_or_404()
     player = get_player_for_game(code)
     if not player and user:
-        # Reconnect: look up by user_id and refresh session key so broadcasts reach this client
-        player = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
-        if player:
-            player.session_key = get_session_key()
-            db.session.commit()
+        existing = Player.query.filter_by(game_id=game.id, user_id=user.id).first()
+        if existing and not existing.session_key.startswith("bot_"):
+            # Same account, different session = second device. Don't steal the slot — spectate only.
+            player = None
     # Resigned players are treated as spectators / kicked out
     if player:
         ps = game.state.get("player_states", {}).get(str(player.id), {})
