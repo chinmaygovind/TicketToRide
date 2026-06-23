@@ -627,19 +627,70 @@ def _next_turn(state: dict):
     order = state["turn_order"]
     cur = state["current_player_id"]
     idx = order.index(cur)
-    nxt = order[(idx + 1) % len(order)]
     state["turns_taken"] = state.get("turns_taken", 0) + 1
 
     if state["phase"] == "final_round":
         remaining = state["final_round_players_left"]
         if cur in remaining:
             remaining.remove(cur)
-        if not remaining:
+        # Drop any resigned players from final round remaining
+        state["final_round_players_left"] = [
+            p for p in remaining
+            if not state["player_states"].get(p, {}).get("resigned")
+        ]
+        if not state["final_round_players_left"]:
             _end_game(state)
             return
 
+    # Skip resigned players when finding next turn
+    nxt = None
+    for i in range(1, len(order) + 1):
+        candidate = order[(idx + i) % len(order)]
+        if not state["player_states"].get(candidate, {}).get("resigned"):
+            nxt = candidate
+            break
+    if nxt is None:
+        _end_game(state)
+        return
+
     state["current_player_id"] = nxt
     state["draw_step"] = 0
+
+
+def resign_player(state: dict, player_id: str) -> dict:
+    ps = state["player_states"].get(player_id)
+    if not ps:
+        return {"ok": False, "error": "Player not found."}
+    if ps.get("resigned"):
+        return {"ok": False, "error": "Already resigned."}
+    if state.get("phase") not in ("main", "final_round"):
+        return {"ok": False, "error": "Cannot resign during this phase."}
+
+    ps["resigned"] = True
+    state.setdefault("action_log", []).append(f"{ps['name']} has resigned from the game.")
+
+    # End immediately if only 1 (or 0) active players remain
+    active = [pid for pid, p in state["player_states"].items() if not p.get("resigned")]
+    if len(active) <= 1:
+        _end_game(state)
+        return {"ok": True}
+
+    # If it was their turn, advance past them
+    if state.get("current_player_id") == player_id:
+        if state["phase"] == "final_round":
+            remaining = state.get("final_round_players_left", [])
+            if player_id in remaining:
+                remaining.remove(player_id)
+            state["final_round_players_left"] = [
+                p for p in remaining
+                if not state["player_states"].get(p, {}).get("resigned")
+            ]
+            if not state["final_round_players_left"]:
+                _end_game(state)
+                return {"ok": True}
+        _next_turn(state)
+
+    return {"ok": True}
 
 
 def _trigger_final_round(state: dict, triggering_player_id: str):

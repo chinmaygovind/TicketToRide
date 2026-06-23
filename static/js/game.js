@@ -1151,14 +1151,19 @@ function renderTickets() {
 
 function renderActionLog() {
   if (!gameState) return;
-  const el = document.getElementById('action-log');
   const log = gameState.action_log || [];
-  el.innerHTML = log.map(l => `<p>${escHtml(l)}</p>`).join('');
-  el.scrollTop = el.scrollHeight;
+  const html = log.map(l => `<p>${escHtml(l)}</p>`).join('');
+  const roundLabel = gameState.round_number ? `ACTION LOG — Round ${gameState.round_number}` : 'ACTION LOG';
+
+  const el = document.getElementById('action-log');
+  if (el) { el.innerHTML = html; el.scrollTop = el.scrollHeight; }
   const label = document.getElementById('action-log-label');
-  if (label && gameState.round_number) {
-    label.textContent = `ACTION LOG — Round ${gameState.round_number}`;
-  }
+  if (label) label.textContent = roundLabel;
+
+  const mobileEl = document.getElementById('mobile-action-log');
+  if (mobileEl) { mobileEl.innerHTML = html; mobileEl.scrollTop = mobileEl.scrollHeight; }
+  const mobileLabel = document.getElementById('mobile-action-log-label');
+  if (mobileLabel) mobileLabel.textContent = roundLabel;
 }
 
 // ─── Status bar ──────────────────────────────────────────────────────────────
@@ -1898,6 +1903,18 @@ document.getElementById('rules-close-btn')?.addEventListener('click', () => {
   document.getElementById('rules-modal').classList.add('hidden');
 });
 
+// Mobile Actions panel — settings, rules, leave buttons
+document.getElementById('settings-btn-mobile')?.addEventListener('click', openSettings);
+document.getElementById('rules-btn-mobile')?.addEventListener('click', () => {
+  document.getElementById('rules-modal').classList.remove('hidden');
+});
+
+document.getElementById('leave-game-btn')?.addEventListener('click', () => {
+  if (!confirm('Leave and resign from this game? Your turns will be skipped for the rest of the game.')) return;
+  socket.emit('resign_game', { code: GAME_CODE });
+  window.location.href = '/lobbies';
+});
+
 if (_loadSetting('ttr_music', false)) {
   musicEnabled = true;
 }
@@ -2047,17 +2064,24 @@ document.addEventListener('keydown', (e) => {
 
   // Tab bar — show left or right sidebar as a slide-up panel
   const tabs = document.querySelectorAll('.mobile-tab');
-  const leftSidebar  = document.querySelector('.left-sidebar');
-  const rightSidebar = document.querySelector('.right-sidebar');
-  const chatPanel    = document.getElementById('chat-panel');
+  const leftSidebar    = document.querySelector('.left-sidebar');
+  const rightSidebar   = document.querySelector('.right-sidebar');
+  const chatPanel      = document.getElementById('chat-panel');
+  const actionsPanel   = document.getElementById('mobile-actions-panel');
 
   function setMobileTab(panelName) {
     tabs.forEach(t => t.classList.toggle('active', t.dataset.panel === panelName));
     leftSidebar.classList.remove('mobile-open');
     rightSidebar.classList.remove('mobile-open');
     if (chatPanel) chatPanel.classList.remove('mobile-open');
+    if (actionsPanel) actionsPanel.classList.remove('mobile-open');
     if (panelName === 'left')  leftSidebar.classList.add('mobile-open');
     if (panelName === 'right') rightSidebar.classList.add('mobile-open');
+    if (panelName === 'actions' && actionsPanel) {
+      actionsPanel.classList.add('mobile-open');
+      const mobileEl = document.getElementById('mobile-action-log');
+      if (mobileEl) setTimeout(() => { mobileEl.scrollTop = mobileEl.scrollHeight; }, 30);
+    }
     if (panelName === 'chat' && chatPanel) {
       chatPanel.classList.add('mobile-open');
       // Clear unread badge when chat tab is opened

@@ -1376,6 +1376,27 @@ def on_place_station(data):
     _player_action(code, lambda state, pid: logic.place_station(state, pid, city, cards))
 
 
+@socketio.on("resign_game")
+def on_resign_game(data):
+    code = data.get("code", "").upper()
+    sk = get_session_key()
+    game = Game.query.filter_by(code=code).first()
+    if not game or game.status not in ("playing", "final_round"):
+        return
+    player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if not player:
+        return
+    state = game.state
+    result = logic.resign_player(state, str(player.id))
+    if result["ok"]:
+        game.state = state
+        if state.get("phase") == "ended":
+            game.status = "ended"
+            game.last_activity_at = datetime.utcnow()
+        db.session.commit()
+        _broadcast_state(game, code)
+
+
 @socketio.on("send_chat")
 def on_send_chat(data):
     code = data.get("code", "").upper()

@@ -75,17 +75,21 @@
 
 <!-- Mobile tab bar (desktop: hidden via CSS) -->
 <div class="mobile-tab-bar">
-  <button class="mobile-tab" data-panel="left">
-    <span class="mobile-tab-icon">🃏</span>
-    <span>Cards</span>
-  </button>
   <button class="mobile-tab active" data-panel="board">
     <span class="mobile-tab-icon">🗺</span>
     <span>Board</span>
   </button>
+  <button class="mobile-tab" data-panel="left">
+    <span class="mobile-tab-icon">🃏</span>
+    <span>Cards</span>
+  </button>
   <button class="mobile-tab" data-panel="right">
-    <span class="mobile-tab-icon">📋</span>
+    <span class="mobile-tab-icon">🎫</span>
     <span>Tickets</span>
+  </button>
+  <button class="mobile-tab" data-panel="actions">
+    <span class="mobile-tab-icon">📋</span>
+    <span>Actions</span>
   </button>
   <button class="mobile-tab" data-panel="chat" id="mobile-chat-tab">
     <span class="mobile-tab-icon">💬</span>
@@ -111,6 +115,19 @@
   <div class="chat-input-row">
     <input type="text" id="chat-input" class="chat-input" placeholder="Message… (M)" maxlength="200" autocomplete="off"/>
     <button id="chat-send-btn" class="chat-send-btn" title="Send">↵</button>
+  </div>
+</div>
+
+<!-- ===== MOBILE ACTIONS PANEL ===== -->
+<div id="mobile-actions-panel" class="mobile-actions-panel">
+  <div class="sidebar-label" id="mobile-action-log-label">ACTION LOG</div>
+  <div id="mobile-action-log" class="action-log" style="flex:1;overflow-y:auto;"></div>
+  <div class="settings-btn-row" style="padding:0.75rem 0.5rem 0.5rem;border-top:1px solid var(--border);gap:0.5rem;">
+    <button id="settings-btn-mobile" class="settings-btn" title="Settings">⚙</button>
+    <button id="rules-btn-mobile" class="settings-btn" title="Rules">?</button>
+    {% if not is_spectator %}
+    <button id="leave-game-btn" class="settings-btn" title="Leave game" style="margin-left:auto;">🚪</button>
+    {% endif %}
   </div>
 </div>
 
