@@ -1652,23 +1652,31 @@ def _run_bots(game: Game, code: str):
                 db.session.commit()
                 continue
 
+            ps = state["player_states"].get(cur_pid, {})
+
+            # Stuck with pending tickets (e.g. draw_tickets kept none) — clear them now
+            if ps.get("pending_tickets"):
+                pending = ps["pending_tickets"]
+                keep = pending[:max(1, len(pending))]  # keep all of them
+                logic.keep_drawn_tickets(state, cur_pid, keep)
+                game.state = state
+                db.session.commit()
+                continue
+
             draw_step = state.get("draw_step", 0)
 
-            # If we're stuck mid-draw (draw_step=1), just do the second draw and move on
+            # Stuck mid-draw (draw_step=1) — complete the second draw
             if draw_step == 1:
                 logic.draw_blind(state, cur_pid)
                 game.state = state
                 db.session.commit()
                 continue
 
-            try:
-                action, params = bot_module.bot_turn(state, cur_pid, personality)
-            except Exception as e:
-                app.logger.error(f"bot_turn error ({personality}): {e}")
-                action, params = "draw_blind", {}
+            def _safe_draw_blind():
+                r = logic.draw_blind(state, cur_pid)
+                return r.get("ok", False)
 
             def _do_second_draw():
-                """Complete the second draw, falling back to blind on any failure."""
                 try:
                     action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
                 except Exception:
@@ -1677,34 +1685,47 @@ def _run_bots(game: Game, code: str):
                 if action2 == "draw_face_up":
                     r2 = logic.draw_face_up(state, cur_pid, params2["slot"])
                     if not r2.get("ok"):
-                        logic.draw_blind(state, cur_pid)  # fallback
+                        _safe_draw_blind()
                 else:
-                    logic.draw_blind(state, cur_pid)
+                    _safe_draw_blind()
+
+            try:
+                action, params = bot_module.bot_turn(state, cur_pid, personality)
+            except Exception as e:
+                app.logger.error(f"bot_turn error ({personality}): {e}")
+                action, params = "draw_blind", {}
 
             if action == "claim":
-                logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
+                result = logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
+                if not result.get("ok"):
+                    # Claim failed — fall back to drawing
+                    if _safe_draw_blind():
+                        _do_second_draw()
 
             elif action == "draw_tickets":
                 result = logic.draw_destination_tickets(state, cur_pid)
                 if result.get("ok"):
-                    ps = state["player_states"].get(cur_pid, {})
-                    pending = ps.get("pending_tickets", [])
+                    fresh_ps = state["player_states"].get(cur_pid, {})
+                    pending = fresh_ps.get("pending_tickets", [])
                     keep = bot_module.bot_keep_initial_tickets(state, cur_pid, pending, personality)
+                    if not keep:
+                        keep = pending[:1]  # must keep at least 1
                     logic.keep_drawn_tickets(state, cur_pid, keep)
+                else:
+                    # draw_tickets failed — fall back to drawing cards
+                    if _safe_draw_blind():
+                        _do_second_draw()
 
             elif action == "draw_face_up":
                 result = logic.draw_face_up(state, cur_pid, params["slot"])
                 if result.get("ok"):
                     _do_second_draw()
                 else:
-                    # Face-up draw failed; fall back to blind draw
-                    result2 = logic.draw_blind(state, cur_pid)
-                    if result2.get("ok"):
+                    if _safe_draw_blind():
                         _do_second_draw()
 
             else:  # draw_blind
-                result = logic.draw_blind(state, cur_pid)
-                if result.get("ok"):
+                if _safe_draw_blind():
                     _do_second_draw()
 
             game.state = state
