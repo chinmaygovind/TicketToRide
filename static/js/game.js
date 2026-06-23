@@ -1243,8 +1243,9 @@ function renderActionButtons() {
   document.getElementById('dest-count').textContent = gameState.dest_deck_count || 0;
 
   const blindBtn = document.getElementById('draw-blind-btn');
-  blindBtn.disabled = !isMyTurn;
-  blindBtn.classList.toggle('active-turn', isMyTurn);
+  const pendingTickets = hasPendingTickets();
+  blindBtn.disabled = !isMyTurn || pendingTickets;
+  blindBtn.classList.toggle('active-turn', isMyTurn && !pendingTickets);
 
   // Europe: station placement button
   const stationBtn = document.getElementById('place-station-btn');
@@ -1252,6 +1253,7 @@ function renderActionButtons() {
     const me = gameState.players[MY_PLAYER_ID];
     const hasStations = me && (me.station_count > 0);
     const canPlaceStation = isMyTurn && !drawingCards && hasStations &&
+      !hasPendingTickets() &&
       (gameState.phase === 'main' || gameState.phase === 'final_round') &&
       !gameState.pending_tunnel;
     stationBtn.disabled = !canPlaceStation;
@@ -1270,6 +1272,7 @@ function renderActionButtons() {
 function onDrawFaceUp(slot, sourceEl) {
   if (!gameState) return;
   if (_sweepInProgress) return; // block clicks while sweep animation plays
+  if (hasPendingTickets()) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   if (gameState.phase !== 'main' && gameState.phase !== 'final_round') return;
   const color = gameState.face_up[slot];
@@ -1280,6 +1283,7 @@ function onDrawFaceUp(slot, sourceEl) {
 
 document.getElementById('draw-blind-btn').addEventListener('click', () => {
   if (!gameState) return;
+  if (hasPendingTickets()) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   // Snapshot current hand so we can diff against the server's response to find the drawn color
   const me = gameState.players?.[MY_PLAYER_ID];
@@ -1319,6 +1323,10 @@ function unhighlightRoute(routeId) {
 function onRouteClick(routeId) {
   if (!gameState) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
+  if (hasPendingTickets()) {
+    showStatus('Keep your destination tickets first.', '#f97316');
+    return;
+  }
   if (gameState.draw_step !== 0) {
     showStatus('Finish drawing cards first.', '#f97316');
     return;
@@ -1347,9 +1355,15 @@ function openClaimModal(route) {
   const hand = me ? me.hand : {};
 
   const info = document.getElementById('claim-info');
+  let routeExtra = '';
+  if (route.ferry > 0) {
+    routeExtra = ` &nbsp;|&nbsp; <span style="color:#f59e0b;">⚓ Ferry — requires ${route.ferry} locomotive${route.ferry > 1 ? 's' : ''}</span>`;
+  } else if (route.tunnel) {
+    routeExtra = ` &nbsp;|&nbsp; <span style="color:#a78bfa;">🏔 Tunnel — 3 cards revealed; may cost extra</span>`;
+  }
   info.innerHTML = `<strong>${escHtml(route.city1)}</strong> → <strong>${escHtml(route.city2)}</strong> &nbsp;|&nbsp;
     Length: <strong>${route.length}</strong> &nbsp;|&nbsp;
-    Color: <strong style="color:${route.color === 'gray' ? '#9ca3af' : BOARD_DATA.card_colors[route.color]}">${route.color.toUpperCase()}</strong>`;
+    Color: <strong style="color:${route.color === 'gray' ? '#9ca3af' : BOARD_DATA.card_colors[route.color]}">${route.color.toUpperCase()}</strong>${routeExtra}`;
 
   // Fixed grid of all 9 card types so layout never shifts
   const selector = document.getElementById('card-selector');

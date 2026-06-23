@@ -150,7 +150,7 @@ def keep_initial_tickets(state: dict, player_id: str, keep_ids: list[int]) -> di
     ps = state["player_states"][player_id]
     pending = ps["pending_tickets"]
     is_europe = state.get("map") == "europe"
-    min_keep = 2 if is_europe else 2
+    min_keep = 2
     if len(keep_ids) < min_keep:
         return {"ok": False, "error": f"Must keep at least {min_keep} destination ticket{'s' if min_keep > 1 else ''}."}
     if not all(k in pending for k in keep_ids):
@@ -202,6 +202,8 @@ def draw_face_up(state: dict, player_id: str, slot: int) -> dict:
         return {"ok": False, "error": "Not your turn."}
     if state.get("pending_tunnel"):
         return {"ok": False, "error": "Resolve the pending tunnel first."}
+    if state["player_states"][player_id].get("pending_tickets"):
+        return {"ok": False, "error": "Keep your destination tickets first."}
 
     card = state["face_up"][slot]
     if card == "locomotive" and state["draw_step"] == 1:
@@ -245,6 +247,8 @@ def draw_blind(state: dict, player_id: str) -> dict:
         return {"ok": False, "error": "Not your turn."}
     if state.get("pending_tunnel"):
         return {"ok": False, "error": "Resolve the pending tunnel first."}
+    if state["player_states"][player_id].get("pending_tickets"):
+        return {"ok": False, "error": "Keep your destination tickets first."}
     _ensure_deck(state)
     if not state["deck"]:
         return {"ok": False, "error": "No cards left to draw."}
@@ -285,6 +289,8 @@ def claim_route(state: dict, player_id: str, route_id: int, cards_to_use: dict) 
         return {"ok": False, "error": "You are in the middle of drawing cards."}
     if state.get("pending_tunnel"):
         return {"ok": False, "error": "Resolve the pending tunnel first."}
+    if state["player_states"][player_id].get("pending_tickets"):
+        return {"ok": False, "error": "Keep your destination tickets first."}
 
     map_variant = state.get("map", "usa")
     route_by_id, _, route_scoring, double_groups = _map_data(map_variant)
@@ -516,6 +522,8 @@ def place_station(state: dict, player_id: str, city: str, cards_to_use: dict) ->
         return {"ok": False, "error": "Resolve the pending tunnel first."}
 
     ps = state["player_states"][player_id]
+    if ps.get("pending_tickets"):
+        return {"ok": False, "error": "Keep your destination tickets first."}
     stations_placed = len(state["stations"].get(player_id, []))
     if ps.get("station_count", 0) <= 0:
         return {"ok": False, "error": "No stations remaining."}
@@ -573,6 +581,8 @@ def draw_destination_tickets(state: dict, player_id: str) -> dict:
         return {"ok": False, "error": "You are in the middle of drawing cards."}
     if state.get("pending_tunnel"):
         return {"ok": False, "error": "Resolve the tunnel first."}
+    if state["player_states"][player_id].get("pending_tickets"):
+        return {"ok": False, "error": "Keep your current destination tickets first."}
 
     if not state["dest_deck"]:
         return {"ok": False, "error": "No destination tickets left."}
