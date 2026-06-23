@@ -121,12 +121,12 @@
 <!-- ===== MOBILE ACTIONS PANEL ===== -->
 <div id="mobile-actions-panel" class="mobile-actions-panel">
   <div class="sidebar-label" id="mobile-action-log-label">ACTION LOG</div>
-  <div id="mobile-action-log" class="action-log" style="flex:1;overflow-y:auto;"></div>
-  <div class="settings-btn-row" style="padding:0.75rem 0.5rem 0.5rem;border-top:1px solid var(--border);gap:0.5rem;">
+  <div id="mobile-action-log" class="action-log mobile-action-log-scroll"></div>
+  <div class="mobile-actions-footer">
     <button id="settings-btn-mobile" class="settings-btn" title="Settings">⚙</button>
     <button id="rules-btn-mobile" class="settings-btn" title="Rules">?</button>
     {% if not is_spectator %}
-    <button id="leave-game-btn" class="settings-btn" title="Leave game" style="margin-left:auto;">🚪</button>
+    <button id="leave-game-btn" class="settings-btn leave-game-btn" title="Leave &amp; resign">🚪</button>
     {% endif %}
   </div>
 </div>

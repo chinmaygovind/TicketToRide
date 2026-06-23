@@ -2445,11 +2445,32 @@ body.spectating #draw-blind-btn { display: none; }
     border-top: 2px solid var(--gold);
     flex-direction: column;
     z-index: 600;
-    padding: 0.5rem 0.75rem 0;
+    padding: 0.6rem 0.9rem 0;
     box-sizing: border-box;
     overflow: hidden;
   }
-  .mobile-actions-panel.mobile-open {
+  .mobile-actions-panel.mobile-open { display: flex; }
+  .mobile-action-log-scroll {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding-bottom: 0.25rem;
+  }
+  .mobile-actions-footer {
     display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0 0.5rem;
+    border-top: 1px solid var(--border);
+  }
+  .leave-game-btn {
+    margin-left: auto;
+    border-color: rgba(239,68,68,0.35) !important;
+    color: rgba(239,68,68,0.7) !important;
+  }
+  .leave-game-btn:hover {
+    border-color: #ef4444 !important;
+    color: #ef4444 !important;
+    background: rgba(239,68,68,0.08) !important;
   }
 }
