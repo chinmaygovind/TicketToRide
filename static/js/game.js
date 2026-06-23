@@ -1909,9 +1909,11 @@ document.getElementById('rules-btn-mobile')?.addEventListener('click', () => {
   document.getElementById('rules-modal').classList.remove('hidden');
 });
 
-document.getElementById('leave-game-btn')?.addEventListener('click', () => {
+function openLeaveModal() {
   document.getElementById('leave-confirm-modal').classList.remove('hidden');
-});
+}
+document.getElementById('leave-game-btn')?.addEventListener('click', openLeaveModal);
+document.getElementById('leave-game-btn-desktop')?.addEventListener('click', openLeaveModal);
 document.getElementById('leave-confirm-cancel')?.addEventListener('click', () => {
   document.getElementById('leave-confirm-modal').classList.add('hidden');
 });
