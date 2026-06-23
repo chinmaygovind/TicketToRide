@@ -56,27 +56,27 @@
       {% endif %}
     </div>
 
-    <!-- Ongoing games (spectate) -->
-    {% if ongoing_games %}
-    <div class="lobbies-section-title" style="margin-top:2rem;">ONGOING GAMES — SPECTATE</div>
-    <div class="lobby-list">
-      {% for game in ongoing_games %}
-      {% set host = game.players | selectattr('is_host') | list | first %}
-      <div class="lobby-card">
-        <div class="lobby-card-info">
-          <div class="lobby-card-host">
-            <strong>{{ host.name if host else 'Unknown' }}</strong>'s Game
+    <!-- Ongoing games (spectate) — populated live by socket -->
+    <div id="ongoing-section" style="{% if not ongoing_games %}display:none{% endif %}">
+      <div class="lobbies-section-title" style="margin-top:2rem;">ONGOING GAMES — SPECTATE</div>
+      <div class="lobby-list" id="ongoing-list">
+        {% for game in ongoing_games %}
+        {% set host = game.players | selectattr('is_host') | list | first %}
+        <div class="lobby-card">
+          <div class="lobby-card-info">
+            <div class="lobby-card-host">
+              <strong>{{ host.name if host else 'Unknown' }}</strong>'s Game
+            </div>
+            <div class="lobby-card-meta">
+              {{ game.players | length }} players &nbsp;·&nbsp; In progress
+            </div>
           </div>
-          <div class="lobby-card-meta">
-            {{ game.players | length }} players &nbsp;·&nbsp; In progress
-          </div>
+          <span class="lobby-card-badge badge-ongoing">LIVE</span>
+          <a href="/game/{{ game.code }}" class="btn-spectate-lobby">👀 Spectate</a>
         </div>
-        <span class="lobby-card-badge badge-ongoing">LIVE</span>
-        <a href="/game/{{ game.code }}" class="btn-spectate-lobby">👀 Spectate</a>
+        {% endfor %}
       </div>
-      {% endfor %}
     </div>
-    {% endif %}
 
   </div>
 </div>
@@ -319,6 +319,62 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeCreateModal();
     closePasscodeModal();
+  }
+});
+
+// ── Live lobby updates via SocketIO ──────────────────────────────────────────
+const socket = io();
+
+socket.on('connect', () => {
+  socket.emit('join_lobbies_room');
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+socket.on('lobbies_update', (data) => {
+  const waiting = data.waiting || [];
+  const ongoing = data.ongoing || [];
+
+  // Re-render waiting games list
+  const list = document.getElementById('lobby-list');
+  if (waiting.length === 0) {
+    list.innerHTML = `<div class="lobby-empty">
+      <div style="font-size:2rem;margin-bottom:0.75rem;">🚂</div>
+      No public games right now. Create one and invite some friends!
+    </div>`;
+  } else {
+    list.innerHTML = waiting.map(g => `
+      <div class="lobby-card">
+        <div class="lobby-card-info">
+          <div class="lobby-card-host"><strong>${escHtml(g.host)}</strong>'s Game</div>
+          <div class="lobby-card-meta">
+            ${g.player_count} / ${g.max_players} players &nbsp;·&nbsp; Waiting to start
+            &nbsp;·&nbsp; ${g.map_variant === 'europe' ? 'Europe' : 'North America'}
+          </div>
+        </div>
+        <span class="lobby-card-badge badge-public">PUBLIC</span>
+        <button class="btn-join-lobby" onclick="joinGame('${escHtml(g.code)}')">Join</button>
+      </div>`).join('');
+  }
+
+  // Re-render ongoing games section
+  const section = document.getElementById('ongoing-section');
+  const ongoingList = document.getElementById('ongoing-list');
+  if (ongoing.length === 0) {
+    section.style.display = 'none';
+  } else {
+    section.style.display = '';
+    ongoingList.innerHTML = ongoing.map(g => `
+      <div class="lobby-card">
+        <div class="lobby-card-info">
+          <div class="lobby-card-host"><strong>${escHtml(g.host)}</strong>'s Game</div>
+          <div class="lobby-card-meta">${g.player_count} players &nbsp;·&nbsp; In progress</div>
+        </div>
+        <span class="lobby-card-badge badge-ongoing">LIVE</span>
+        <a href="/game/${escHtml(g.code)}" class="btn-spectate-lobby">👀 Spectate</a>
+      </div>`).join('');
   }
 });
 

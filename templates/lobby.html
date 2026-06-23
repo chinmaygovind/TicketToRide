@@ -41,6 +41,9 @@
           Waiting for the host…
         </div>
         {% endif %}
+        <button id="leave-btn" class="btn-secondary" style="margin-top:0.75rem;width:100%;padding:0.5rem;font-size:0.8rem;opacity:0.7;">
+          Leave Game
+        </button>
       </div>
 
       <div class="lobby-panel code-box">
@@ -51,13 +54,18 @@
         {% if game.is_private and game.passcode %}
         <div class="passcode-display">Passcode: <span class="passcode-value">{{ game.passcode }}</span></div>
         {% endif %}
-        <button class="copy-btn" id="copy-btn" title="Copy invite link">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          Copy Link
-        </button>
+        <div style="display:flex;gap:0.5rem;flex-wrap:wrap;justify-content:center;">
+          <button class="copy-btn" id="copy-btn" title="Copy invite link" style="font-size:0.75rem;padding:0.35rem 0.8rem;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Copy Link
+          </button>
+          <button id="share-btn" title="Share" style="display:none;font-size:0.75rem;padding:0.35rem 0.8rem;" class="copy-btn">
+            📤 Send Link
+          </button>
+        </div>
         <div id="copy-feedback" class="copy-feedback hidden">Copied!</div>
       </div>
 
@@ -205,6 +213,22 @@ if (IS_HOST) {
   });
   document.getElementById('add-bot-btn').addEventListener('click', () => {
     socket.emit('add_bot', { code: GAME_CODE });
+  });
+}
+
+// Leave game
+document.getElementById('leave-btn').addEventListener('click', () => {
+  socket.emit('leave_lobby', { code: GAME_CODE });
+  window.location.href = '/lobbies';
+});
+
+// Native share button — only show on mobile if Web Share API is available
+const shareBtn = document.getElementById('share-btn');
+if (navigator.share && /Mobi|Android|iPhone|iPad/i.test(navigator.userAgent)) {
+  shareBtn.style.display = '';
+  shareBtn.addEventListener('click', () => {
+    const url = window.location.origin + '/lobby/' + GAME_CODE;
+    navigator.share({ title: 'Join my Ticket to Ride game!', url }).catch(() => {});
   });
 }
 </script>

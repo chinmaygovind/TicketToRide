@@ -797,6 +797,35 @@ def admin_delete(table_name, row_id):
     return jsonify({"ok": True})
 
 
+def _get_lobbies_payload():
+    """Return serializable dict of current public waiting + ongoing games."""
+    waiting = (Game.query
+               .filter_by(status="waiting", is_private=False)
+               .order_by(Game.created_at.desc()).all())
+    ongoing = (Game.query
+               .filter(Game.status.in_(["playing", "final_round"]), Game.is_private == False)
+               .order_by(Game.created_at.desc()).limit(10).all())
+
+    def _game_card(g):
+        host = next((p for p in g.players if p.is_host), None)
+        return {
+            "code": g.code,
+            "host": host.name if host else "Unknown",
+            "player_count": len(g.players),
+            "max_players": g.max_players,
+            "map_variant": g.map_variant or "usa",
+        }
+
+    return {
+        "waiting": [_game_card(g) for g in waiting],
+        "ongoing": [_game_card(g) for g in ongoing],
+    }
+
+
+def _emit_lobbies_update():
+    socketio.emit("lobbies_update", _get_lobbies_payload(), to="global_lobby")
+
+
 @app.route("/lobbies")
 @require_login
 def lobbies():
@@ -867,6 +896,7 @@ def create_game():
 
     site_url = SITE_URL or request.host_url.rstrip("/")
     eventlet.spawn(_send_game_notifications, code, player_name, site_url)
+    _emit_lobbies_update()
 
     return jsonify({"ok": True, "code": code})
 
@@ -927,6 +957,7 @@ def join_game_http():
     db.session.commit()
 
     socketio.emit("player_joined", game.to_lobby_dict(), to=code)
+    _emit_lobbies_update()
     return jsonify({"ok": True, "code": code})
 
 
@@ -947,7 +978,9 @@ def lobby(code):
         return redirect(url_for("lobbies"))
     if game.status == "playing":
         return redirect(url_for("game_page", code=code.upper()))
-    return render_template("lobby.html", game=game, player=player)
+    user = get_current_user()
+    guest_name = session.get("guest_name") if not user else None
+    return render_template("lobby.html", game=game, player=player, user=user, guest_name=guest_name)
 
 
 @app.route("/game/<code>")
@@ -1026,6 +1059,12 @@ def on_disconnect():
         _online_users.pop(user.id, None)
 
 
+@socketio.on("join_lobbies_room")
+def on_join_lobbies_room(data=None):
+    join_room("global_lobby")
+    emit("lobbies_update", _get_lobbies_payload())
+
+
 @socketio.on("join_lobby")
 def on_join_lobby(data):
     code = data.get("code", "").upper()
@@ -1034,6 +1073,30 @@ def on_join_lobby(data):
         return
     join_room(code)
     emit("lobby_state", game.to_lobby_dict())
+
+
+@socketio.on("leave_lobby")
+def on_leave_lobby(data):
+    code = data.get("code", "").upper()
+    sk = get_session_key()
+    game = Game.query.filter_by(code=code).first()
+    if not game or game.status != "waiting":
+        return
+    player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if not player:
+        return
+    if player.is_host:
+        # Host leaves → close the lobby
+        socketio.emit("lobby_closed", {"reason": "Host left the lobby."}, to=code)
+        for p in game.players:
+            db.session.delete(p)
+        db.session.delete(game)
+        db.session.commit()
+    else:
+        db.session.delete(player)
+        db.session.commit()
+        socketio.emit("player_joined", game.to_lobby_dict(), to=code)
+    _emit_lobbies_update()
 
 
 @socketio.on("start_game")
@@ -1067,6 +1130,7 @@ def on_start_game(data):
     db.session.commit()
 
     socketio.emit("game_started", {"code": code}, to=code)
+    _emit_lobbies_update()
     _run_bots(game, code)
 
 
@@ -1567,6 +1631,7 @@ def _stale_game_cleanup():
                 db.session.delete(game)
             if stale_waiting:
                 db.session.commit()
+                _emit_lobbies_update()
 
     _run_cleanup()  # immediate pass on startup
     while True:
