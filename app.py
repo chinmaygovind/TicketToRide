@@ -1099,6 +1099,9 @@ def on_join_lobby(data):
     if not game:
         return
     join_room(code)
+    if game.status != "waiting":
+        emit("game_started", {"code": code})
+        return
     emit("lobby_state", game.to_lobby_dict())
 
 
