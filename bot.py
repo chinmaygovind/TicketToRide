@@ -24,6 +24,7 @@ BOT_TYPES = [
     ("rocket-bot", "rocket_bot"),
     ("ticket-bot", "ticket_bot"),
     ("chaos-bot",  "chaos_bot"),
+    ("claude-bot", "claude_bot"),
 ]
 
 # route length -> priority weight for long-route-focused bots
@@ -444,12 +445,89 @@ def _chaos_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, 
 # Public API
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# claude-bot: The Learned Bot
+# Uses weights tuned by train_claude_bot.py. Falls back to fish_bot defaults.
+# ---------------------------------------------------------------------------
+
+import os as _os
+_WEIGHTS_FILE = _os.path.join(_os.path.dirname(__file__), "claude_bot_weights.json")
+_claude_weights = None
+
+def _load_claude_weights():
+    global _claude_weights
+    if _claude_weights is None:
+        if _os.path.exists(_WEIGHTS_FILE):
+            import json as _json
+            with open(_WEIGHTS_FILE) as f:
+                _claude_weights = _json.load(f)
+        else:
+            # Fallback defaults (between fish and chin style)
+            _claude_weights = {
+                "length_weights": {"1":0.3,"2":0.4,"3":0.8,"4":1.2,"5":2.2,"6":4.0},
+                "ticket_weight": 1.8,
+                "chain_bonus": 1.0,
+                "loco_slot_bias": 0.7,
+                "ticket_draw_threshold": 1,
+            }
+    return _claude_weights
+
+
+def _claude_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
+    from game_logic import is_path_connected
+
+    w = _load_claude_weights()
+    lw = {int(k): v for k, v in w["length_weights"].items()}
+    tw = w.get("ticket_weight", 1.8)
+    cb = w.get("chain_bonus", 1.0)
+    loco_bias = w.get("loco_slot_bias", 0.7)
+
+    scored = _score_routes_weighted(
+        state, pid, route_by_id, ticket_by_id,
+        length_weights=lw, ticket_weight=tw, chain_bonus=cb,
+    )
+
+    if draw_step == 0:
+        for rid, _ in sorted(scored.items(), key=lambda x: -x[1]):
+            route = route_by_id.get(rid)
+            if not route or str(rid) in claimed:
+                continue
+            cards = _can_claim(hand, route, trains)
+            if cards:
+                return "claim", {"route_id": rid, "cards": cards}
+
+    if draw_step == 0 and state.get("phase") == "main":
+        ps = state["player_states"].get(pid, {})
+        uncompleted = sum(
+            1 for tid in ps.get("tickets", [])
+            if (t := ticket_by_id.get(tid)) and
+            not is_path_connected(state, pid, t["city1"], t["city2"])
+        )
+        dest_key = "europe_dest_deck" if state.get("map") == "europe" else "dest_deck"
+        threshold = int(w.get("ticket_draw_threshold", 1))
+        if uncompleted <= threshold and len(state.get(dest_key, [])) >= 3:
+            return "draw_tickets", {}
+
+    if draw_step == 0 and random.random() < loco_bias:
+        for i, card in enumerate(face_up):
+            if card == "loco":
+                return "draw_face_up", {"slot": i}
+
+    needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
+    for i, card in enumerate(face_up):
+        if card in needed:
+            return "draw_face_up", {"slot": i}
+
+    return "draw_blind", {}
+
+
 _DISPATCH = {
     "fish_bot":   _fish_turn,
     "chin_bot":   _chin_turn,
     "rocket_bot": _rocket_turn,
     "ticket_bot": _ticket_turn,
     "chaos_bot":  _chaos_turn,
+    "claude_bot": _claude_turn,
 }
 
 
