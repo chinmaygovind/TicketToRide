@@ -392,8 +392,7 @@ socket.on('game_state', (state) => {
   const _sweepChanges = _oldFaceUp.filter((c, i) => c !== _newFaceUp[i]).length;
   const _doSweep = gameState && !_sweepInProgress && _sweepChanges >= 5 && _oldFaceUp.length === 5;
   if (_doSweep) {
-    state.face_up = _oldFaceUp; // Keep old cards in state so animation has a "from" state
-    _sweepInProgress = true;
+    state.face_up = _oldFaceUp; // Keep old cards visible so renderAll has something to render
   }
 
   // Animate my blind draw with the real card color now that the server has told us what it was
@@ -416,7 +415,10 @@ socket.on('game_state', (state) => {
   }
   renderAll();
 
-  if (_doSweep) _runSweepAnimation(_newFaceUp);
+  if (_doSweep) {
+    _sweepInProgress = true; // Set AFTER renderAll so old cards are in the DOM first
+    _runSweepAnimation(_newFaceUp);
+  }
 });
 
 socket.on('game_state_update', (state) => {
@@ -480,11 +482,13 @@ socket.on('game_state_update', (state) => {
 
   // Only run the animation if game_state hasn't already started it (it always arrives first)
   const doSweep = isSweep && !_sweepInProgress;
-  if (isSweep) _sweepInProgress = true; // block renderFaceUpCards regardless
 
   renderAll();
 
-  if (doSweep) _runSweepAnimation(newFaceUp);
+  if (doSweep) {
+    _sweepInProgress = true; // Set AFTER renderAll so old cards are in the DOM first
+    _runSweepAnimation(newFaceUp);
+  }
 });
 
 socket.on('error', (data) => {

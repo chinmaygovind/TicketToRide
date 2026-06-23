@@ -141,19 +141,18 @@
     </div><!-- /.login-panels -->
     {% endif %}
 
+    {% if git_version_name %}
+    <div style="text-align:center;margin-top:1.25rem;padding-bottom:0.25rem;">
+      <span style="font-size:0.6rem;color:rgba(200,168,75,0.45);font-family:'Cinzel',serif;letter-spacing:0.07em;">
+        Playing version
+        <a href="{{ git_commit_url }}" target="_blank" rel="noopener"
+           style="color:rgba(200,168,75,0.7);text-decoration:none;border-bottom:1px solid rgba(200,168,75,0.25);transition:border-color 0.15s;"
+           onmouseover="this.style.borderBottomColor='var(--gold)'"
+           onmouseout="this.style.borderBottomColor='rgba(200,168,75,0.25)'">{{ git_version_name }}</a>
+      </span>
+    </div>
+    {% endif %}
   </div>
-
-  {% if git_version_name %}
-  <div style="position:absolute;bottom:0.75rem;right:1rem;z-index:2;">
-    <span style="font-size:0.65rem;color:rgba(200,168,75,0.55);font-family:'Cinzel',serif;letter-spacing:0.08em;">
-      Playing version
-      <a href="{{ git_commit_url }}" target="_blank" rel="noopener"
-         style="color:var(--gold);text-decoration:none;border-bottom:1px solid rgba(200,168,75,0.35);transition:border-color 0.15s;"
-         onmouseover="this.style.borderBottomColor='var(--gold)'"
-         onmouseout="this.style.borderBottomColor='rgba(200,168,75,0.35)'">{{ git_version_name }}</a>
-    </span>
-  </div>
-  {% endif %}
 </div>
 {% endblock %}
 
