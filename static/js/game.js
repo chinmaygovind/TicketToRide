@@ -2107,6 +2107,14 @@ document.addEventListener('keydown', (e) => {
     }
   }
 
+  let _activeTab = 'board';
+  const _origSetMobileTab = setMobileTab;
+  setMobileTab = function(panelName) {
+    const toggling = panelName !== 'board' && panelName === _activeTab;
+    _activeTab = toggling ? 'board' : panelName;
+    _origSetMobileTab(_activeTab);
+  };
+
   tabs.forEach(tab => {
     tab.addEventListener('click', () => setMobileTab(tab.dataset.panel));
   });
