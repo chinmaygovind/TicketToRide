@@ -224,10 +224,37 @@ def _send_email(to_email: str, subject: str, body: str):
 
 def _send_game_notifications(game_code: str, host_name: str, site_url: str):
     join_url = f"{site_url}/lobby/{game_code}"
-    message = f"New TTR Game! Hosted by {host_name}. Join here: {join_url}"
+    message = f"{host_name} just created a Ticket to Ride game! Join here: {join_url}"
     with app.app_context():
-        users = User.query.filter_by(notify_new_game=True).all()
-        for user in users:
+        # Find the host's user_id from the game
+        game = Game.query.filter_by(code=game_code).first()
+        if not game:
+            return
+        host_player = next((p for p in game.players if p.is_host), None)
+        host_user_id = host_player.user_id if host_player else None
+
+        if host_user_id:
+            # Notify only accepted friends of the host who have notifications on
+            friend_ids = db.session.execute(
+                db.text("""
+                    SELECT friend_id FROM friendships
+                    WHERE user_id = :uid AND status = 'accepted'
+                    UNION
+                    SELECT user_id FROM friendships
+                    WHERE friend_id = :uid AND status = 'accepted'
+                """),
+                {"uid": host_user_id}
+            ).fetchall()
+            friend_user_ids = [row[0] for row in friend_ids]
+            users_to_notify = User.query.filter(
+                User.id.in_(friend_user_ids),
+                User.notify_new_game == True,  # noqa: E712
+            ).all()
+        else:
+            # Host is a guest — notify nobody (no friend graph without a user account)
+            users_to_notify = []
+
+        for user in users_to_notify:
             if user.phone:
                 _send_sms(user.phone, message)
             elif user.email:
