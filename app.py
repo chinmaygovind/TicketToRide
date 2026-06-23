@@ -866,10 +866,13 @@ def lobbies():
               .filter(Game.status.in_(["playing", "waiting"]))
               .first())
     if active:
-        if active.game.status == "playing":
-            return redirect(url_for("game_page", code=active.game.code))
-        else:
-            return redirect(url_for("lobby", code=active.game.code))
+        # Don't redirect resigned players back into the game
+        player_state = active.game.state.get("player_states", {}).get(str(active.id), {})
+        if not player_state.get("resigned"):
+            if active.game.status == "playing":
+                return redirect(url_for("game_page", code=active.game.code))
+            else:
+                return redirect(url_for("lobby", code=active.game.code))
 
     guest_name = session.get("guest_name") if not user else None
     public_games = (Game.query
@@ -1022,6 +1025,11 @@ def game_page(code):
         if player:
             player.session_key = get_session_key()
             db.session.commit()
+    # Resigned players are treated as spectators / kicked out
+    if player:
+        ps = game.state.get("player_states", {}).get(str(player.id), {})
+        if ps.get("resigned"):
+            return redirect(url_for("lobbies"))
     is_spectator = player is None
     if game.status == "waiting":
         if player:

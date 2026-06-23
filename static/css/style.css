@@ -1983,6 +1983,9 @@ body.spectating #draw-blind-btn { display: none; }
   /* Hide desktop sidebars */
   .sidebar { display: none !important; }
 
+  /* Hide settings/rules buttons from the Tickets tab — they live in Actions tab instead */
+  .sidebar.mobile-open .settings-footer { display: none !important; }
+
   /* Sidebar as slide-up panel when activated */
   .sidebar.mobile-open {
     display: flex !important;
