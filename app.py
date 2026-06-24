@@ -1769,14 +1769,7 @@ def _run_bots(game: Game, code: str):
                 _force_advance_bot()
                 _no_progress += 1
                 if _no_progress >= len(turn_order) * 4:
-                    # True deadlock — end the game
-                    state["phase"] = "ended"
-                    if not state.get("winner_id"):
-                        best = max(
-                            state["player_states"].items(),
-                            key=lambda x: x[1].get("route_score", 0),
-                        )
-                        state["winner_id"] = best[0]
+                    logic._end_game(state)
                     game.state = state
                     db.session.commit()
                     break

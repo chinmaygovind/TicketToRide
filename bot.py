@@ -550,9 +550,10 @@ def bot_turn(state: dict, pid: str, personality: str = "fish_bot"):
     face_up   = state["face_up"]
     claimed   = state["claimed_routes"]
 
-    # Emergency: if hand is very large (all cards hoarded), always try to claim
-    # any available route on the first draw step to prevent card-hoarding deadlock.
-    if draw_step == 0 and sum(hand.values()) > 20:
+    # If drawing is impossible (deck+discard empty) or hand is very large,
+    # always try to place a route rather than spinning on failed draws.
+    deck_empty = not state.get("deck") and not state.get("discard")
+    if draw_step == 0 and (deck_empty or sum(hand.values()) > 12):
         for rid, route in route_by_id.items():
             if str(rid) not in claimed:
                 cards = _can_claim(hand, route, trains)

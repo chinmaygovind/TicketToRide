@@ -152,15 +152,10 @@ def run_full_game(player_specs, map_variant="usa", personality="fish_bot",
             state["current_player_id"] = order[idx]
             state["turns_taken"] = state.get("turns_taken", 0) + 1
             no_progress += 1
-            # After all players fail to act repeatedly, consider game deadlocked
+            # After all players fail to act repeatedly, consider game deadlocked.
+            # Call _end_game so scores are properly computed.
             if no_progress >= len(player_specs) * 4:
-                state["phase"] = "ended"
-                if not state.get("winner_id"):
-                    best = max(
-                        state["player_states"].items(),
-                        key=lambda x: x[1].get("route_score", 0)
-                    )
-                    state["winner_id"] = best[0]
+                logic._end_game(state)
                 state.setdefault("action_log", []).append("Game ended!")
                 break
         else:
@@ -576,13 +571,7 @@ def _run_game_pair(personality_a, personality_b, map_variant="usa", max_iteratio
             state["turns_taken"] = state.get("turns_taken", 0) + 1
             no_progress += 1
             if no_progress >= len(specs) * 4:
-                state["phase"] = "ended"
-                if not state.get("winner_id"):
-                    best = max(
-                        state["player_states"].items(),
-                        key=lambda x: x[1].get("route_score", 0)
-                    )
-                    state["winner_id"] = best[0]
+                logic._end_game(state)
                 state.setdefault("action_log", []).append("Game ended!")
                 break
         else:
