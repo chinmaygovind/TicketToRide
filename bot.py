@@ -450,18 +450,42 @@ def _chaos_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, 
 # ---------------------------------------------------------------------------
 
 import os as _os
-_WEIGHTS_FILE = _os.path.join(_os.path.dirname(__file__), "claude_bot_weights.json")
+
+# ---------------------------------------------------------------------------
+# claude-bot: ISMCTS agent (loaded lazily from claude-bot/bot_entry.py)
+# Falls back to weight-based heuristic if the package is unavailable.
+# ---------------------------------------------------------------------------
+
 _claude_weights = None
+_claude_ismcts_fn = None   # set to claude_ismcts_turn on first successful import
+
+
+def _load_claude_agent():
+    """Try to import the ISMCTS agent from the claude-bot subpackage."""
+    global _claude_ismcts_fn
+    if _claude_ismcts_fn is not None:
+        return _claude_ismcts_fn
+    try:
+        import importlib.util, sys
+        _entry = _os.path.join(_os.path.dirname(__file__), "claude-bot", "bot_entry.py")
+        spec   = importlib.util.spec_from_file_location("bot_entry", _entry)
+        mod    = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _claude_ismcts_fn = mod.claude_ismcts_turn
+    except Exception:
+        _claude_ismcts_fn = None
+    return _claude_ismcts_fn
+
 
 def _load_claude_weights():
     global _claude_weights
     if _claude_weights is None:
+        _WEIGHTS_FILE = _os.path.join(_os.path.dirname(__file__), "claude_bot_weights.json")
         if _os.path.exists(_WEIGHTS_FILE):
             import json as _json
             with open(_WEIGHTS_FILE) as f:
                 _claude_weights = _json.load(f)
         else:
-            # Fallback defaults (between fish and chin style)
             _claude_weights = {
                 "length_weights": {"1":0.3,"2":0.4,"3":0.8,"4":1.2,"5":2.2,"6":4.0},
                 "ticket_weight": 1.8,
@@ -473,12 +497,18 @@ def _load_claude_weights():
 
 
 def _claude_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
-    from game_logic import is_path_connected
+    # Prefer ISMCTS agent when available
+    agent = _load_claude_agent()
+    if agent is not None:
+        return agent(state, pid, route_by_id, ticket_by_id,
+                     hand, trains, draw_step, face_up, claimed)
 
-    w = _load_claude_weights()
-    lw = {int(k): v for k, v in w["length_weights"].items()}
-    tw = w.get("ticket_weight", 1.8)
-    cb = w.get("chain_bonus", 1.0)
+    # Fallback: weight-based heuristic
+    from game_logic import is_path_connected
+    w         = _load_claude_weights()
+    lw        = {int(k): v for k, v in w["length_weights"].items()}
+    tw        = w.get("ticket_weight", 1.8)
+    cb        = w.get("chain_bonus", 1.0)
     loco_bias = w.get("loco_slot_bias", 0.7)
 
     scored = _score_routes_weighted(
