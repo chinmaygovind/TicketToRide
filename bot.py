@@ -90,9 +90,9 @@ def _dijkstra(adj: dict, start: str, end: str):
 def _can_claim(hand: dict, route: dict, trains_left: int):
     """Return card dict to claim route, or None."""
     length = route["length"]
-    color  = route.get("color", "grey")
+    color  = route.get("color", "gray")
     ferry  = route.get("ferry", 0)
-    locos  = hand.get("loco", 0)
+    locos  = hand.get("locomotive", 0)
 
     if length > trains_left:
         return None
@@ -107,7 +107,7 @@ def _can_claim(hand: dict, route: dict, trains_left: int):
         if cu:
             r[target] = cu
         if lu:
-            r["loco"] = lu
+            r["locomotive"] = lu
         return r if sum(r.values()) == length else None
 
     if ferry > 0:
@@ -115,10 +115,10 @@ def _can_claim(hand: dict, route: dict, trains_left: int):
             return None
         loco_budget = locos - ferry
         remaining   = length - ferry
-        fc = route.get("color", "grey")
+        fc = route.get("color", "gray")
         candidates = (
-            [fc] if fc != "grey"
-            else sorted([c for c in hand if c != "loco" and hand[c] > 0],
+            [fc] if fc != "gray"
+            else sorted([c for c in hand if c != "locomotive" and hand[c] > 0],
                         key=lambda c: -hand[c])
         )
         for c in candidates:
@@ -127,26 +127,26 @@ def _can_claim(hand: dict, route: dict, trains_left: int):
             lu = max(0, remaining - cu)
             if lu > loco_budget:
                 continue
-            r = {"loco": ferry + lu}
+            r = {"locomotive": ferry + lu}
             if cu:
                 r[c] = cu
             if sum(r.values()) == length:
                 return r
         return None
 
-    if color == "grey":
-        non_loco = sorted([(c, n) for c, n in hand.items() if c != "loco" and n > 0],
+    if color == "gray":
+        non_loco = sorted([(c, n) for c, n in hand.items() if c != "locomotive" and n > 0],
                           key=lambda x: -x[1])
         for c, _ in non_loco:
             r = _try(c, locos)
             if r:
                 return r
-        return {"loco": length} if locos >= length else None
+        return {"locomotive": length} if locos >= length else None
     else:
         r = _try(color, locos)
         if r:
             return r
-        return {"loco": length} if locos >= length else None
+        return {"locomotive": length} if locos >= length else None
 
 
 def _score_routes_weighted(state, pid, route_by_id, ticket_by_id, length_weights,
@@ -205,8 +205,8 @@ def _needed_colors_for_scores(state, pid, route_by_id, scored, top_n=5):
         route = route_by_id.get(rid)
         if not route:
             continue
-        c = route.get("color", "grey")
-        if c not in ("grey", "loco"):
+        c = route.get("color", "gray")
+        if c not in ("gray", "locomotive"):
             color_score[c] += score
     if not color_score:
         return set()
@@ -230,8 +230,7 @@ def _best_claimable(scored, route_by_id, claimed, hand, trains, top_n=None):
 
 
 def _has_dest_deck(state):
-    key = "europe_dest_deck" if state.get("map") == "europe" else "dest_deck"
-    return len(state.get(key, state.get("dest_deck", []))) >= 3
+    return len(state.get("dest_deck", [])) >= 3
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +253,7 @@ def _fish_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, f
 
     if draw_step == 0:
         for i, card in enumerate(face_up):
-            if card == "loco":
+            if card == "locomotive":
                 return "draw_face_up", {"slot": i}
 
     needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
@@ -299,7 +298,7 @@ def _chin_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, f
     # Always grab face-up loco
     if draw_step == 0:
         for i, card in enumerate(face_up):
-            if card == "loco":
+            if card == "locomotive":
                 return "draw_face_up", {"slot": i}
 
     needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
@@ -337,7 +336,7 @@ def _rocket_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step,
 
     if draw_step == 0:
         for i, card in enumerate(face_up):
-            if card == "loco":
+            if card == "locomotive":
                 return "draw_face_up", {"slot": i}
 
     needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
@@ -347,7 +346,7 @@ def _rocket_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step,
 
     # Speed demon takes whatever face-up card looks useful
     for i, card in enumerate(face_up):
-        if card != "loco":
+        if card != "locomotive":
             return "draw_face_up", {"slot": i}
 
     return "draw_blind", {}
@@ -387,7 +386,7 @@ def _ticket_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step,
 
     if draw_step == 0:
         for i, card in enumerate(face_up):
-            if card == "loco":
+            if card == "locomotive":
                 return "draw_face_up", {"slot": i}
 
     needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
@@ -431,9 +430,9 @@ def _chaos_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, 
     if draw_step == 0 or True:
         available = [(i, c) for i, c in enumerate(face_up)]
         if draw_step == 0:
-            available = [(i, c) for i, c in available if c != "loco" or random.random() < 0.8]
+            available = [(i, c) for i, c in available if c != "locomotive" or random.random() < 0.8]
         else:
-            available = [(i, c) for i, c in available if c != "loco"]
+            available = [(i, c) for i, c in available if c != "locomotive"]
         if available and random.random() < 0.6:
             i, _ = random.choice(available)
             return "draw_face_up", {"slot": i}
@@ -503,14 +502,13 @@ def _claude_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step,
             if (t := ticket_by_id.get(tid)) and
             not is_path_connected(state, pid, t["city1"], t["city2"])
         )
-        dest_key = "europe_dest_deck" if state.get("map") == "europe" else "dest_deck"
         threshold = int(w.get("ticket_draw_threshold", 1))
-        if uncompleted <= threshold and len(state.get(dest_key, [])) >= 3:
+        if uncompleted <= threshold and len(state.get("dest_deck", [])) >= 3:
             return "draw_tickets", {}
 
     if draw_step == 0 and random.random() < loco_bias:
         for i, card in enumerate(face_up):
-            if card == "loco":
+            if card == "locomotive":
                 return "draw_face_up", {"slot": i}
 
     needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
@@ -552,6 +550,15 @@ def bot_turn(state: dict, pid: str, personality: str = "fish_bot"):
     face_up   = state["face_up"]
     claimed   = state["claimed_routes"]
 
+    # Emergency: if hand is very large (all cards hoarded), always try to claim
+    # any available route on the first draw step to prevent card-hoarding deadlock.
+    if draw_step == 0 and sum(hand.values()) > 20:
+        for rid, route in route_by_id.items():
+            if str(rid) not in claimed:
+                cards = _can_claim(hand, route, trains)
+                if cards:
+                    return "claim", {"route_id": rid, "cards": cards}
+
     fn = _DISPATCH.get(personality, _fish_turn)
     return fn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed)
 
@@ -575,13 +582,13 @@ def bot_resolve_tunnel(state: dict, pid: str, personality: str = "fish_bot"):
     if personality == "chaos_bot" and random.random() < 0.3:
         return False, {}
 
-    if not extra_color or extra_color == "loco":
-        if hand.get("loco", 0) >= extra_cost:
-            return True, {"loco": extra_cost}
+    if not extra_color or extra_color == "locomotive":
+        if hand.get("locomotive", 0) >= extra_cost:
+            return True, {"locomotive": extra_cost}
         return False, {}
 
     have_color = hand.get(extra_color, 0)
-    have_loco  = hand.get("loco", 0)
+    have_loco  = hand.get("locomotive", 0)
     cu = min(have_color, extra_cost)
     lu = extra_cost - cu
     if lu <= have_loco:
@@ -589,7 +596,7 @@ def bot_resolve_tunnel(state: dict, pid: str, personality: str = "fish_bot"):
         if cu:
             cards[extra_color] = cu
         if lu:
-            cards["loco"] = lu
+            cards["locomotive"] = lu
         return True, cards
     return False, {}
 

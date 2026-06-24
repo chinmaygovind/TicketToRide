@@ -1490,7 +1490,30 @@ def _player_action(code: str, action_fn):
 
     db.session.commit()
     _broadcast_state(game, code)
-    _run_bots(game, code)
+    # Spawn bots in background so the state update reaches the client immediately.
+    game_id = game.id
+    eventlet.spawn_n(_run_bots_bg, game_id, code)
+
+
+def _run_bots_bg(game_id: int, code: str):
+    """Background greenlet: yield to deliver state update, then run bots with delay."""
+    import random as _rand
+    eventlet.sleep(0)  # yield so emitted state is delivered before bot acts
+    with app.app_context():
+        game = db.session.get(Game, game_id)
+        if not game:
+            return
+        state = game.state
+        phase = state.get("phase")
+        if phase in ("main", "final_round"):
+            cur_pid = state.get("current_player_id")
+            cur_player = next((p for p in game.players if str(p.id) == cur_pid), None)
+            if cur_player and cur_player.session_key.startswith("bot_"):
+                eventlet.sleep(_rand.uniform(1.0, 4.0))
+                game = db.session.get(Game, game_id)  # re-fetch after sleep
+                if not game:
+                    return
+        _run_bots(game, code)
 
 
 def _finalize_game_stats(game: Game, state: dict):
@@ -1607,6 +1630,7 @@ def _broadcast_state(game: Game, code: str):
 
 def _run_bots(game: Game, code: str):
     import bot as bot_module
+    _no_progress = 0
 
     for _ in range(100):
         state = game.state
@@ -1660,10 +1684,21 @@ def _run_bots(game: Game, code: str):
                 continue
 
             draw_step = state.get("draw_step", 0)
+            turn_order = state.get("turn_order", [])
+
+            def _force_advance_bot():
+                """Advance to next player when the bot is completely stuck."""
+                if turn_order:
+                    idx = (turn_order.index(cur_pid) + 1) % len(turn_order)
+                    state["draw_step"] = 0
+                    state["current_player_id"] = turn_order[idx]
+                    state["turns_taken"] = state.get("turns_taken", 0) + 1
 
             # Stuck mid-draw (draw_step=1) — complete the second draw
             if draw_step == 1:
-                logic.draw_blind(state, cur_pid)
+                r = logic.draw_blind(state, cur_pid)
+                if not r.get("ok"):
+                    _force_advance_bot()
                 game.state = state
                 db.session.commit()
                 continue
@@ -1691,12 +1726,15 @@ def _run_bots(game: Game, code: str):
                 app.logger.error(f"bot_turn error ({personality}): {e}")
                 action, params = "draw_blind", {}
 
+            advanced = False
+
             if action == "claim":
                 result = logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
-                if not result.get("ok"):
-                    # Claim failed — fall back to drawing
-                    if _safe_draw_blind():
-                        _do_second_draw()
+                if result.get("ok"):
+                    advanced = True
+                elif _safe_draw_blind():
+                    _do_second_draw()
+                    advanced = True
 
             elif action == "draw_tickets":
                 result = logic.draw_destination_tickets(state, cur_pid)
@@ -1705,24 +1743,45 @@ def _run_bots(game: Game, code: str):
                     pending = fresh_ps.get("pending_tickets", [])
                     keep = bot_module.bot_keep_initial_tickets(state, cur_pid, pending, personality)
                     if not keep:
-                        keep = pending[:1]  # must keep at least 1
+                        keep = pending[:1]
                     logic.keep_drawn_tickets(state, cur_pid, keep)
-                else:
-                    # draw_tickets failed — fall back to drawing cards
-                    if _safe_draw_blind():
-                        _do_second_draw()
+                    advanced = True
+                elif _safe_draw_blind():
+                    _do_second_draw()
+                    advanced = True
 
             elif action == "draw_face_up":
                 result = logic.draw_face_up(state, cur_pid, params["slot"])
                 if result.get("ok"):
                     _do_second_draw()
-                else:
-                    if _safe_draw_blind():
-                        _do_second_draw()
+                    advanced = True
+                elif _safe_draw_blind():
+                    _do_second_draw()
+                    advanced = True
 
             else:  # draw_blind
                 if _safe_draw_blind():
                     _do_second_draw()
+                    advanced = True
+
+            # If nothing worked (deck exhausted + routes blocked), force-advance
+            if not advanced and str(state.get("current_player_id")) == cur_pid:
+                _force_advance_bot()
+                _no_progress += 1
+                if _no_progress >= len(turn_order) * 4:
+                    # True deadlock — end the game
+                    state["phase"] = "ended"
+                    if not state.get("winner_id"):
+                        best = max(
+                            state["player_states"].items(),
+                            key=lambda x: x[1].get("route_score", 0),
+                        )
+                        state["winner_id"] = best[0]
+                    game.state = state
+                    db.session.commit()
+                    break
+            else:
+                _no_progress = 0
 
             game.state = state
             db.session.commit()

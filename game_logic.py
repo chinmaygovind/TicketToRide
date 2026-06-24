@@ -126,11 +126,19 @@ def init_game_state(players: list[dict], map_variant: str = "usa") -> dict:
 
 
 def _maybe_replace_three_locos(face_up: list[str], deck: list[str]) -> list[str]:
-    """If 3+ locomotives are face-up, discard all five and draw five new ones."""
-    while face_up.count("locomotive") >= 3:
+    """If 3+ locomotives are face-up, discard all five and draw five new ones.
+
+    Safety cap: if every available card is a locomotive (e.g. bots hoarded all
+    non-loco cards), reshuffling will never produce a valid hand. After a few
+    attempts we accept the all-loco state rather than spinning forever.
+    """
+    for _ in range(30):
+        if face_up.count("locomotive") < 3:
+            break
         deck.extend(face_up)
         random.shuffle(deck)
-        face_up = [deck.pop() for _ in range(5)]
+        n = min(5, len(deck))
+        face_up = [deck.pop() for _ in range(n)]
     return face_up
 
 

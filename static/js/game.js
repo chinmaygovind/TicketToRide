@@ -416,8 +416,8 @@ socket.on('game_state', (state) => {
   renderAll();
 
   if (_doSweep) {
-    _sweepInProgress = true; // Set AFTER renderAll so old cards are in the DOM first
-    _runSweepAnimation(_newFaceUp);
+    _sweepInProgress = true; // Block clicks immediately; sweep starts after 0.5s preview
+    setTimeout(() => _runSweepAnimation(_newFaceUp), 500);
   }
 });
 
@@ -486,8 +486,8 @@ socket.on('game_state_update', (state) => {
   renderAll();
 
   if (doSweep) {
-    _sweepInProgress = true; // Set AFTER renderAll so old cards are in the DOM first
-    _runSweepAnimation(newFaceUp);
+    _sweepInProgress = true; // Block clicks immediately; sweep starts after 0.5s preview
+    setTimeout(() => _runSweepAnimation(newFaceUp), 500);
   }
 });
 

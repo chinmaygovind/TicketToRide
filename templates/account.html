@@ -182,6 +182,19 @@
     </div>
 
   </div>
+
+  {% if git_version_name %}
+  <div style="text-align:center;padding:1.5rem 0 0.5rem;margin-top:0.5rem;">
+    <span style="font-size:0.6rem;color:rgba(200,168,75,0.45);font-family:'Cinzel',serif;letter-spacing:0.07em;">
+      Playing version
+      <a href="{{ git_commit_url }}" target="_blank" rel="noopener"
+         style="color:rgba(200,168,75,0.55);text-decoration:none;border-bottom:1px solid rgba(200,168,75,0.2);transition:border-color 0.15s;"
+         onmouseover="this.style.borderBottomColor='rgba(200,168,75,0.55)'"
+         onmouseout="this.style.borderBottomColor='rgba(200,168,75,0.2)'">{{ git_version_name }}</a>
+    </span>
+  </div>
+  {% endif %}
+
 </div>
 {% endblock %}
 
