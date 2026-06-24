@@ -1270,8 +1270,7 @@ def on_kick_player(data):
         db.session.commit()
         socketio.emit("player_joined", game.to_lobby_dict(), to=code)
     else:
-        # Convert to bot so turns auto-play; real player will be redirected by event
-        target.session_key = f"bot_kicked_{uuid.uuid4()}"
+        target.session_key = f"bot_fish_bot_{uuid.uuid4()}"
         db.session.commit()
         _run_bots(game, code)
 
@@ -1386,26 +1385,31 @@ def on_place_station(data):
     _player_action(code, lambda state, pid: logic.place_station(state, pid, city, cards))
 
 
+def _replace_player_with_bot(game: Game, player: Player, code: str):
+    """Convert a leaving player's slot to a bot. Works in any game phase."""
+    state = game.state
+    if state.get("phase") == "ended":
+        return
+    state.setdefault("action_log", []).append(f"{player.name} has left the game.")
+    game.state = state
+    player.session_key = f"bot_fish_bot_{uuid.uuid4()}"
+    db.session.commit()
+    _broadcast_state(game, code)
+    _run_bots(game, code)
+
+
 @app.route("/resign/<code>", methods=["POST"])
 def resign_game_http(code):
     code = code.upper()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
-    if not game or game.status not in ("playing", "final_round"):
-        return jsonify({"ok": False, "error": "Game not active."})
+    if not game or game.status != "playing":
+        return jsonify({"ok": True})  # already ended or not started — just let them navigate away
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if not player:
-        return jsonify({"ok": False, "error": "Not in this game."})
-    state = game.state
-    result = logic.resign_player(state, str(player.id))
-    if result["ok"]:
-        game.state = state
-        if state.get("phase") == "ended":
-            game.status = "ended"
-            game.last_activity_at = datetime.utcnow()
-        db.session.commit()
-        _broadcast_state(game, code)
-    return jsonify(result)
+        return jsonify({"ok": True})  # spectator or already left — nothing to resign
+    _replace_player_with_bot(game, player, code)
+    return jsonify({"ok": True})
 
 
 @socketio.on("resign_game")
@@ -1413,20 +1417,12 @@ def on_resign_game(data):
     code = data.get("code", "").upper()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
-    if not game or game.status not in ("playing", "final_round"):
+    if not game or game.status != "playing":
         return
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if not player:
         return
-    state = game.state
-    result = logic.resign_player(state, str(player.id))
-    if result["ok"]:
-        game.state = state
-        if state.get("phase") == "ended":
-            game.status = "ended"
-            game.last_activity_at = datetime.utcnow()
-        db.session.commit()
-        _broadcast_state(game, code)
+    _replace_player_with_bot(game, player, code)
 
 
 @socketio.on("send_chat")
