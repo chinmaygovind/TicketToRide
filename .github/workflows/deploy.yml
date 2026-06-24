@@ -22,7 +22,6 @@ jobs:
 
       - name: Run tests
         env:
-          DATABASE_URL: "sqlite:///instance/test_tickettoride.db"
           SECRET_KEY: "ci-test-secret"
         run: pytest tests/ -v --tb=short
 
