@@ -1219,17 +1219,21 @@ def on_add_bot(data):
         emit("error", {"message": "Game is full."})
         return
 
-    bot_count = sum(1 for p in game.players if p.session_key.startswith("bot_"))
+    import bot as bot_module
+    import random as _random
+
     used_colors = {p.color for p in game.players}
     available = [c for c in PLAYER_COLORS if c not in used_colors]
     if not available:
         emit("error", {"message": "No colors available."})
         return
 
+    display_name, slug = _random.choice(bot_module.BOT_TYPES)
+
     bot = Player(
         game_id=game.id,
-        session_key=f"bot_{uuid.uuid4()}",
-        name=f"Bot {bot_count + 1}",
+        session_key=f"bot_{slug}_{uuid.uuid4()}",
+        name=display_name,
         color=available[0],
         turn_order=len(game.players),
         is_host=False,
@@ -1266,8 +1270,7 @@ def on_kick_player(data):
         db.session.commit()
         socketio.emit("player_joined", game.to_lobby_dict(), to=code)
     else:
-        # Convert to bot so turns auto-play; real player will be redirected by event
-        target.session_key = f"bot_kicked_{uuid.uuid4()}"
+        target.session_key = f"bot_fish_bot_{uuid.uuid4()}"
         db.session.commit()
         _run_bots(game, code)
 
@@ -1382,26 +1385,31 @@ def on_place_station(data):
     _player_action(code, lambda state, pid: logic.place_station(state, pid, city, cards))
 
 
+def _replace_player_with_bot(game: Game, player: Player, code: str):
+    """Convert a leaving player's slot to a bot. Works in any game phase."""
+    state = game.state
+    if state.get("phase") == "ended":
+        return
+    state.setdefault("action_log", []).append(f"{player.name} has left the game.")
+    game.state = state
+    player.session_key = f"bot_fish_bot_{uuid.uuid4()}"
+    db.session.commit()
+    _broadcast_state(game, code)
+    _run_bots(game, code)
+
+
 @app.route("/resign/<code>", methods=["POST"])
 def resign_game_http(code):
     code = code.upper()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
-    if not game or game.status not in ("playing", "final_round"):
-        return jsonify({"ok": False, "error": "Game not active."})
+    if not game or game.status != "playing":
+        return jsonify({"ok": True})  # already ended or not started — just let them navigate away
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if not player:
-        return jsonify({"ok": False, "error": "Not in this game."})
-    state = game.state
-    result = logic.resign_player(state, str(player.id))
-    if result["ok"]:
-        game.state = state
-        if state.get("phase") == "ended":
-            game.status = "ended"
-            game.last_activity_at = datetime.utcnow()
-        db.session.commit()
-        _broadcast_state(game, code)
-    return jsonify(result)
+        return jsonify({"ok": True})  # spectator or already left — nothing to resign
+    _replace_player_with_bot(game, player, code)
+    return jsonify({"ok": True})
 
 
 @socketio.on("resign_game")
@@ -1409,20 +1417,12 @@ def on_resign_game(data):
     code = data.get("code", "").upper()
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
-    if not game or game.status not in ("playing", "final_round"):
+    if not game or game.status != "playing":
         return
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
     if not player:
         return
-    state = game.state
-    result = logic.resign_player(state, str(player.id))
-    if result["ok"]:
-        game.state = state
-        if state.get("phase") == "ended":
-            game.status = "ended"
-            game.last_activity_at = datetime.utcnow()
-        db.session.commit()
-        _broadcast_state(game, code)
+    _replace_player_with_bot(game, player, code)
 
 
 @socketio.on("send_chat")
@@ -1606,6 +1606,8 @@ def _broadcast_state(game: Game, code: str):
 
 
 def _run_bots(game: Game, code: str):
+    import bot as bot_module
+
     for _ in range(100):
         state = game.state
         phase = state.get("phase")
@@ -1619,7 +1621,9 @@ def _run_bots(game: Game, code: str):
                 ps = state["player_states"].get(pid, {})
                 pending = ps.get("pending_tickets", [])
                 if pending:
-                    logic.keep_initial_tickets(state, pid, pending)
+                    personality = bot_module._extract_personality(p.session_key)
+                    keep = bot_module.bot_keep_initial_tickets(state, pid, pending, personality)
+                    logic.keep_initial_tickets(state, pid, keep)
                     game.state = state
                     db.session.commit()
                     acted = True
@@ -1630,19 +1634,98 @@ def _run_bots(game: Game, code: str):
         elif phase in ("main", "final_round"):
             cur_pid = state["current_player_id"]
             cur_player = next((p for p in game.players if str(p.id) == cur_pid), None)
-            if cur_player and cur_player.session_key.startswith("bot_"):
-                # If a tunnel is pending for this bot, abort it (bots don't pay extra)
-                if state.get("pending_tunnel") and state["pending_tunnel"].get("player_id") == cur_pid:
-                    logic.resolve_tunnel(state, cur_pid, proceed=False)
-                else:
-                    for _ in range(2):
-                        result = logic.draw_blind(state, cur_pid)
-                        if not result["ok"]:
-                            break
+            if not (cur_player and cur_player.session_key.startswith("bot_")):
+                break
+
+            personality = bot_module._extract_personality(cur_player.session_key)
+
+            # Resolve pending tunnel first
+            if state.get("pending_tunnel") and state["pending_tunnel"].get("player_id") == cur_pid:
+                proceed, extra_cards = bot_module.bot_resolve_tunnel(state, cur_pid, personality)
+                logic.resolve_tunnel(state, cur_pid, proceed=proceed,
+                                     extra_cards=extra_cards if proceed else None)
                 game.state = state
                 db.session.commit()
-            else:
-                break
+                continue
+
+            ps = state["player_states"].get(cur_pid, {})
+
+            # Stuck with pending tickets (e.g. draw_tickets kept none) — clear them now
+            if ps.get("pending_tickets"):
+                pending = ps["pending_tickets"]
+                keep = pending[:max(1, len(pending))]  # keep all of them
+                logic.keep_drawn_tickets(state, cur_pid, keep)
+                game.state = state
+                db.session.commit()
+                continue
+
+            draw_step = state.get("draw_step", 0)
+
+            # Stuck mid-draw (draw_step=1) — complete the second draw
+            if draw_step == 1:
+                logic.draw_blind(state, cur_pid)
+                game.state = state
+                db.session.commit()
+                continue
+
+            def _safe_draw_blind():
+                r = logic.draw_blind(state, cur_pid)
+                return r.get("ok", False)
+
+            def _do_second_draw():
+                try:
+                    action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
+                except Exception:
+                    action2 = "draw_blind"
+                    params2 = {}
+                if action2 == "draw_face_up":
+                    r2 = logic.draw_face_up(state, cur_pid, params2["slot"])
+                    if not r2.get("ok"):
+                        _safe_draw_blind()
+                else:
+                    _safe_draw_blind()
+
+            try:
+                action, params = bot_module.bot_turn(state, cur_pid, personality)
+            except Exception as e:
+                app.logger.error(f"bot_turn error ({personality}): {e}")
+                action, params = "draw_blind", {}
+
+            if action == "claim":
+                result = logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
+                if not result.get("ok"):
+                    # Claim failed — fall back to drawing
+                    if _safe_draw_blind():
+                        _do_second_draw()
+
+            elif action == "draw_tickets":
+                result = logic.draw_destination_tickets(state, cur_pid)
+                if result.get("ok"):
+                    fresh_ps = state["player_states"].get(cur_pid, {})
+                    pending = fresh_ps.get("pending_tickets", [])
+                    keep = bot_module.bot_keep_initial_tickets(state, cur_pid, pending, personality)
+                    if not keep:
+                        keep = pending[:1]  # must keep at least 1
+                    logic.keep_drawn_tickets(state, cur_pid, keep)
+                else:
+                    # draw_tickets failed — fall back to drawing cards
+                    if _safe_draw_blind():
+                        _do_second_draw()
+
+            elif action == "draw_face_up":
+                result = logic.draw_face_up(state, cur_pid, params["slot"])
+                if result.get("ok"):
+                    _do_second_draw()
+                else:
+                    if _safe_draw_blind():
+                        _do_second_draw()
+
+            else:  # draw_blind
+                if _safe_draw_blind():
+                    _do_second_draw()
+
+            game.state = state
+            db.session.commit()
         else:
             break
 

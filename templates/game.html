@@ -67,6 +67,8 @@
       <div class="settings-btn-row" style="justify-content:flex-end;padding-right:0.2rem;">
         {% if not is_spectator %}
         <button id="leave-game-btn-desktop" class="settings-btn leave-game-btn" title="Leave &amp; resign">🚪</button>
+        {% else %}
+        <button id="leave-spectator-btn-desktop" class="settings-btn" title="Stop watching" onclick="window.location.href='/lobbies'">🚪</button>
         {% endif %}
         <button id="settings-btn" class="settings-btn">⚙</button>
         <button id="rules-btn" class="settings-btn">?</button>
@@ -130,6 +132,8 @@
     <button id="rules-btn-mobile" class="settings-btn" title="Rules">?</button>
     {% if not is_spectator %}
     <button id="leave-game-btn" class="settings-btn leave-game-btn" title="Leave &amp; resign">🚪</button>
+    {% else %}
+    <button id="leave-spectator-btn" class="settings-btn" title="Stop watching" onclick="window.location.href='/lobbies'">🚪</button>
     {% endif %}
   </div>
 </div>
