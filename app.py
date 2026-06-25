@@ -1553,10 +1553,16 @@ def _run_bots_bg(game_id: int, code: str):
             cur_pid = state.get("current_player_id")
             cur_player = next((p for p in game.players if str(p.id) == cur_pid), None)
             if cur_player and cur_player.session_key.startswith("bot_"):
-                eventlet.sleep(_rand.uniform(1.0, 4.0))
-                game = db.session.get(Game, game_id)  # re-fetch after sleep
-                if not game:
-                    return
+                # Fast heuristic bots move near-instantly, so add a human-like
+                # pacing delay. claude_bot's ISMCTS already takes a couple seconds
+                # to "think", so skip the extra delay for it — it's slow enough.
+                import bot as _bot_module
+                _personality = _bot_module._extract_personality(cur_player.session_key)
+                if _personality != "claude_bot":
+                    eventlet.sleep(_rand.uniform(1.0, 4.0))
+                    game = db.session.get(Game, game_id)  # re-fetch after sleep
+                    if not game:
+                        return
         _run_bots(game, code)
 
 
