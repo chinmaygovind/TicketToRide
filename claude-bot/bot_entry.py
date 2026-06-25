@@ -95,11 +95,18 @@ def claude_ismcts_turn(
     """
     cfg        = _cfg()
     policy     = _get_policy()
-    rollout_fn = _get_rollout_fn()
+
+    # Fast path: n_iter <= 0 disables ISMCTS entirely and just returns the
+    # heuristic move (~0.3ms vs ~90ms with rollouts). Used in tests, which only
+    # verify games complete — not that the bot searches. Set CLAUDE_BOT_ITER=0.
+    if cfg["n_iter"] <= 0:
+        return policy(state, pid)
 
     # draw_step == 1: second card draw.  Low-stakes; skip ISMCTS overhead.
     if draw_step == 1:
         return policy(state, pid)
+
+    rollout_fn = _get_rollout_fn()
 
     return ismcts(
         state              = state,
