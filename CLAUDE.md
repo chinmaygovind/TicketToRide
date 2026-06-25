@@ -5,7 +5,7 @@
 Full multiplayer online Ticket to Ride (North America map). Flask + Flask-SocketIO backend, vanilla JS + SVG frontend, SQLite/PostgreSQL database.
 
 **Run locally:** `python app.py` → http://localhost:5001  
-**Production:** http://52.54.184.133 (EC2, `aws-deploy` branch)
+**Production:** http://52.54.184.133 (EC2) — auto-deployed from `main` on every push
 
 ## Architecture
 
@@ -81,8 +81,13 @@ Output model/weights land in `claude-bot/model/` and are loaded at bot runtime.
 ## Development Notes
 
 - **Python 3.14, Windows 11** dev machine; production is Ubuntu 22.04
-- `main` branch: `async_mode="threading"`, run with `python app.py`
-- `aws-deploy` branch: eventlet + gunicorn + nginx
-- SQLite on EC2 — data lives on instance disk, lost if instance is terminated
+- `main` is the source of truth and is what gets deployed. `app.py` uses `async_mode="eventlet"`.
+- **Local dev:** `python app.py` → http://localhost:5001 (eventlet dev server)
+- **Deploy:** push to `main` → GitHub Actions (`.github/workflows/deploy.yml`) runs pytest,
+  then SSHes to EC2, `git reset --hard origin/main`, and restarts the systemd service
+- **Production runtime:** systemd unit runs `gunicorn --worker-class eventlet -w 1` behind nginx
+  (see `deploy/tickettoride.service` + `deploy/nginx.conf`)
 - Single gunicorn worker required (socket rooms in-process); don't increase without Redis
+- SQLite on EC2 — data lives on instance disk, lost if instance is terminated
 - No HTTPS on EC2 currently
+- `aws-deploy` branch is legacy/stale — not used by the deploy pipeline
