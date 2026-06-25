@@ -1628,6 +1628,25 @@ def _broadcast_state(game: Game, code: str):
     socketio.emit("game_state_update", generic, to=code)
 
 
+def _bot_decide(bot_module, state, pid, personality):
+    """
+    Run a bot's decision OFF the eventlet hub.
+
+    claude_bot's ISMCTS is ~2s of pure-Python CPU work that never yields. Run
+    directly on the eventlet greenlet, it blocks the single hub for that whole
+    time — the WebSocket can't send/receive and the client appears to hang.
+    eventlet.tpool.execute runs it in a native thread so the hub stays
+    responsive. bot_turn is read-only on `state` (ISMCTS deep-copies internally),
+    so this is thread-safe. Falls back to a direct call if tpool is unavailable
+    (e.g. under the pytest test client with no real eventlet hub).
+    """
+    try:
+        from eventlet import tpool as _tpool
+        return _tpool.execute(bot_module.bot_turn, state, pid, personality)
+    except Exception:
+        return bot_module.bot_turn(state, pid, personality)
+
+
 def _run_bots(game: Game, code: str):
     import bot as bot_module
     _no_progress = 0
@@ -1709,7 +1728,7 @@ def _run_bots(game: Game, code: str):
 
             def _do_second_draw():
                 try:
-                    action2, params2 = bot_module.bot_turn(state, cur_pid, personality)
+                    action2, params2 = _bot_decide(bot_module, state, cur_pid, personality)
                 except Exception:
                     action2 = "draw_blind"
                     params2 = {}
@@ -1721,7 +1740,7 @@ def _run_bots(game: Game, code: str):
                     _safe_draw_blind()
 
             try:
-                action, params = bot_module.bot_turn(state, cur_pid, personality)
+                action, params = _bot_decide(bot_module, state, cur_pid, personality)
             except Exception as e:
                 app.logger.error(f"bot_turn error ({personality}): {e}")
                 action, params = "draw_blind", {}
