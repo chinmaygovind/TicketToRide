@@ -596,6 +596,55 @@ def test_final_round_ends_after_all_play(two_player_specs):
 # End game scoring
 # ---------------------------------------------------------------------------
 
+def test_tiebreak_uses_completed_tickets_not_kept(monkeypatch, two_player_specs):
+    """On a score tie, the player with more COMPLETED tickets wins (official rule),
+    not the one who merely KEPT more. Regression for the g173 fix."""
+    import collections
+    state = make_state(two_player_specs)
+    advance_to_main(state, two_player_specs)
+    p1, p2 = state["turn_order"][0], state["turn_order"][1]
+
+    # Neutralise longest path so it can't decide the tie (both get the bonus).
+    monkeypatch.setattr(logic, "longest_path", lambda s, pid: 0)
+
+    def path_routes(c1, c2):
+        adj = collections.defaultdict(list)
+        for rid, r in ROUTE_BY_ID.items():
+            adj[r["city1"]].append((r["city2"], rid))
+            adj[r["city2"]].append((r["city1"], rid))
+        q = collections.deque([(c1, [])]); seen = {c1}
+        while q:
+            city, pth = q.popleft()
+            if city == c2:
+                return pth
+            for nb, rid in adj[city]:
+                if nb not in seen:
+                    seen.add(nb); q.append((nb, pth + [rid]))
+        return []
+
+    tk, t2, t3 = DESTINATION_TICKETS[0], DESTINATION_TICKETS[1], DESTINATION_TICKETS[2]
+
+    # P1: keeps ONE ticket and completes it (claims its connecting path).
+    for rid in path_routes(tk["city1"], tk["city2"]):
+        state["claimed_routes"][str(rid)] = p1
+    state["player_states"][p1]["tickets"] = [tk["id"]]
+    state["player_states"][p1]["route_score"] = 0
+
+    # P2: keeps TWO tickets, completes NEITHER (no routes), but route_score is set
+    # so the totals tie exactly:  P1 = tk.pts ;  P2 = route_score - t2 - t3 = tk.pts.
+    state["player_states"][p2]["tickets"] = [t2["id"], t3["id"]]
+    state["player_states"][p2]["route_score"] = tk["points"] + t2["points"] + t3["points"]
+
+    state["phase"] = "final_round"
+    state["final_round_players_left"] = []
+    logic._end_game(state)
+
+    s1, s2 = state["scores"][p1], state["scores"][p2]
+    assert s1["total"] == s2["total"], "test setup should tie the totals"
+    # OLD logic (most tickets KEPT) would pick p2; NEW logic (most COMPLETED) picks p1.
+    assert state["winner_id"] == p1
+
+
 def test_end_game_ticket_completed_adds_points(two_player_specs):
     state = make_state(two_player_specs)
     advance_to_main(state, two_player_specs)

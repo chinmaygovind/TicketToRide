@@ -177,6 +177,20 @@ def _my_cities(claimed, pid):
     return cities
 
 
+def _my_degrees(claimed, pid):
+    """City -> number of my own routes touching it. Degree-1 cities are the
+    ENDPOINTS of my network; extending an endpoint lengthens my longest trail,
+    whereas building off a junction just adds a branch."""
+    deg = {}
+    for rid, owner in claimed.items():
+        if owner == pid:
+            r = ROUTE_BY_ID.get(int(rid))
+            if r:
+                deg[r["city1"]] = deg.get(r["city1"], 0) + 1
+                deg[r["city2"]] = deg.get(r["city2"], 0) + 1
+    return deg
+
+
 def _component_root(edges):
     """Union-find over (city1, city2) edges -> {city: root}."""
     parent = {}
@@ -256,6 +270,11 @@ def shitter_policy(state, pid):
     )
 
     my_cities = _my_cities(claimed, pid)
+    my_deg    = _my_degrees(claimed, pid)
+    endpoints = {c for c, d in my_deg.items() if d == 1}
+    my_root   = _component_root([(ROUTE_BY_ID[int(r)]["city1"], ROUTE_BY_ID[int(r)]["city2"])
+                                 for r, o in claimed.items()
+                                 if o == pid and int(r) in ROUTE_BY_ID])
     adj       = _available_adj(state, pid)
 
     # Incomplete reachable tickets -> their (long-route-biased) path.
@@ -279,6 +298,21 @@ def shitter_policy(state, pid):
     opp_need = _estimate_opponent_needs(state, pid)
     owing    = bool(targets)
 
+    # How hard to chase the longest-path bonus by extending our endpoints. Once
+    # tickets are done we check whether an opponent's longest path rivals ours; if
+    # they're ahead or close, extending (linear growth) is worth much more — taking
+    # a slightly worse route to lengthen our single path can flip the 10pt bonus
+    # and the tiebreak. (longest_path is only computed here, in the endgame phase.)
+    extend_weight = 3.0
+    if not owing and my_cities:
+        try:
+            my_lp  = logic.longest_path(state, pid)
+            opp_lp = max((logic.longest_path(state, o)
+                          for o in state["player_states"] if o != pid), default=0)
+            extend_weight = 6.0 if opp_lp >= my_lp - 2 else 3.0
+        except Exception:
+            extend_weight = 4.0
+
     if draw_step == 0:
         best_rid, best_cards, best_score = None, None, -1.0
         for _val, rid, route in ROUTES_BY_VALUE:
@@ -301,12 +335,24 @@ def shitter_policy(state, pid):
 
             score += _PTS.get(length, 1) + 0.8 * length  # route points + longest-path nudge
 
-            c1in = route["city1"] in my_cities
-            c2in = route["city2"] in my_cities
-            if c1in or c2in:
-                score += 5.0                             # continuity: extend the network
+            c1, c2 = route["city1"], route["city2"]
+            c1in, c2in = c1 in my_cities, c2 in my_cities
             if c1in and c2in:
-                score += 3.0                             # join two of my own clusters
+                # Both ends already mine: MERGING two separate clusters into one
+                # network is valuable (helps tickets + a longer single path); a
+                # route inside one cluster is just a useless cycle.
+                if my_root.get(c1) != my_root.get(c2):
+                    score += 6.0 + 0.3 * length          # merge clusters
+                else:
+                    score += 1.0                         # cycle — minimal value
+            elif c1in or c2in:
+                # Connects to my network. Extending an ENDPOINT lengthens my single
+                # longest trail (great for longest-path); building off a junction is
+                # just a branch.
+                if (c1 in endpoints) or (c2 in endpoints):
+                    score += 5.0 + extend_weight + 0.3 * length
+                else:
+                    score += 4.0                         # branch off a junction
 
             ob = opp_need.get(rid, 0)
             if ob > 0 and (on_plan or length >= 4 or trains > 22):

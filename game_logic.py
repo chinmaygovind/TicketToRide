@@ -767,9 +767,11 @@ def _end_game(state: dict):
 
     state["scores"] = scores
 
+    # Official Ticket to Ride tiebreak: highest score, then most COMPLETED
+    # destination tickets, then longest path.
     sorted_players = sorted(scores.items(), key=lambda x: (
         x[1]["total"],
-        len(state["player_states"][x[0]]["tickets"]),
+        sum(1 for t in x[1]["tickets"] if t["completed"]),
         x[1]["longest_path"],
     ), reverse=True)
     state["winner_id"] = sorted_players[0][0]
