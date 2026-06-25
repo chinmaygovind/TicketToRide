@@ -27,6 +27,7 @@ BOT_TYPES = [
     ("greedy-bot",    "greedy_bot"),
     ("blocking-bot",  "blocking_bot"),
     ("claude-bot",    "claude_bot"),
+    ("shitter-bot",   "shitter_bot"),
 ]
 
 # route length -> priority weight for long-route-focused bots
@@ -479,6 +480,40 @@ def _load_claude_agent():
     return _claude_ismcts_fn
 
 
+# ---------------------------------------------------------------------------
+# shitter-bot: sophisticated direct policy (its own subpackage shitter-bot/)
+# ---------------------------------------------------------------------------
+
+_shitter_fn = None   # set to shitter_turn on first successful import
+
+
+def _load_shitter_agent():
+    """Lazily import the shitter-bot policy from the shitter-bot subfolder."""
+    global _shitter_fn
+    if _shitter_fn is not None:
+        return _shitter_fn
+    try:
+        import importlib.util
+        _entry = _os.path.join(_os.path.dirname(__file__), "shitter-bot", "bot_entry.py")
+        spec   = importlib.util.spec_from_file_location("shitter_bot_entry", _entry)
+        mod    = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _shitter_fn = mod.shitter_turn
+    except Exception:
+        _shitter_fn = False
+    return _shitter_fn
+
+
+def _shitter_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
+    agent = _load_shitter_agent()
+    if agent:
+        return agent(state, pid, route_by_id, ticket_by_id,
+                     hand, trains, draw_step, face_up, claimed)
+    # Fallback to the fish strategy if the subpackage can't be loaded.
+    return _fish_turn(state, pid, route_by_id, ticket_by_id,
+                      hand, trains, draw_step, face_up, claimed)
+
+
 def _load_claude_weights():
     global _claude_weights
     if _claude_weights is None:
@@ -675,6 +710,7 @@ _DISPATCH = {
     "greedy_bot":   _greedy_turn,
     "blocking_bot": _blocking_turn,
     "claude_bot":   _claude_turn,
+    "shitter_bot":  _shitter_turn,
 }
 
 
@@ -749,10 +785,157 @@ def bot_resolve_tunnel(state: dict, pid: str, personality: str = "fish_bot"):
     return False, {}
 
 
+# ---------------------------------------------------------------------------
+# claude_bot ticket selection — expected-value subset chooser
+#
+# Unlike the other bots (which keep every *reachable* ticket), claude_bot keeps
+# the subset of tickets with the best *expected* net score, where a ticket only
+# pays off if we are likely to actually COMPLETE it. Uncompleted tickets are
+# subtracted at scoring, so keeping unlikely tickets is negative EV.
+#
+# Calibration anchor (mined from 291 human player-games on the live server):
+#   winners finished 89% of kept tickets (avg 0.43 incomplete, 71% finished with
+#   ZERO dead weight); losers only 59% (avg 1.54 incomplete). Keeping *fewer but
+#   finishable* tickets is what separates strong play — so the model rewards
+#   completability and route overlap, not mere reachability.
+# ---------------------------------------------------------------------------
+
+# EV-model constants.
+#
+# Calibrated against live data: humans complete ~75% of kept tickets and ticket
+# *length* barely predicts completion (76% for short vs 71% for long). What
+# actually loses games is carrying tickets you can't BUILD — i.e. a plan whose
+# combined track exceeds your remaining trains (common mid-game with few trains
+# left). So feasibility only drops once the plan OVERRUNS the train budget; a
+# coherent, affordable plan keeps every ticket (matching winner behavior).
+_TICKET_BUDGET_FRAC = 0.85   # fraction of remaining trains earmarked for ticket track
+_FEAS_BASE          = 0.92   # completion prob of an affordable plan (~ human rate)
+_FEAS_OVER_SLOPE    = 0.90   # feasibility lost per budget-worth of overrun
+_FEAS_FLOOR         = 0.35
+_INDIV_SLOPE        = 0.008  # mild per-train penalty (length is a weak signal)
+_INDIV_FLOOR        = 0.60
+_INDIV_CAP          = 0.97
+
+
+def _clamp(x, lo, hi):
+    return lo if x < lo else hi if x > hi else x
+
+
+def _sp_rids(adj: dict, start: str, end: str, free: set):
+    """Shortest path (list of route ids) where routes in `free` cost 0 trains.
+
+    Lets already-owned / already-planned track be reused for free, which is how
+    we reward tickets that overlap an existing or shared corridor.
+    """
+    if start == end:
+        return []
+    dist = {start: 0}
+    prev = {}
+    heap = [(0, start)]
+    while heap:
+        d, city = heapq.heappop(heap)
+        if city == end:
+            path, cur = [], end
+            while cur in prev:
+                pc, rid = prev[cur]
+                path.append(rid)
+                cur = pc
+            return list(reversed(path))
+        if d > dist.get(city, float("inf")):
+            continue
+        for cost, nbr, rid in adj.get(city, []):
+            w  = 0 if rid in free else cost
+            nd = d + w
+            if nd < dist.get(nbr, float("inf")):
+                dist[nbr] = nd
+                prev[nbr] = (city, rid)
+                heapq.heappush(heap, (nd, nbr))
+    return None
+
+
+def _subset_ev(sub, owned, route_by_id, trains_left):
+    """Expected net ticket points for keeping the tickets in `sub`.
+
+    sub: list of (tid, ticket, path_set_or_None, indep_train_cost).
+    Completed ticket  -> +points ; incomplete ticket -> -points, so each ticket
+    contributes points * (2*p_complete - 1). Overlapping paths share track,
+    lowering the combined train cost and raising everyone's feasibility.
+    """
+    # Combined plan: union of each ticket's shortest-path edges (owned = free).
+    # Sorting shortest-first then unioning lets later tickets reuse earlier track.
+    total_new = set()
+    for _tid, _t, path, _cost in sorted(sub, key=lambda x: x[3]):
+        if path is not None:
+            total_new |= (path - owned)
+    total_trains = sum(route_by_id[r]["length"] for r in total_new if r in route_by_id)
+
+    # Feasibility: full while the plan fits the train budget, falling off only
+    # as it overruns (you physically can't lay track you don't have trains for).
+    budget = max(1.0, trains_left * _TICKET_BUDGET_FRAC)
+    over   = max(0.0, total_trains - budget)
+    feas   = _clamp(_FEAS_BASE - _FEAS_OVER_SLOPE * (over / budget),
+                    _FEAS_FLOOR, _FEAS_BASE)
+
+    ev = 0.0
+    for _tid, t, path, cost in sub:
+        pts = t.get("points", 0)
+        if path is None:                       # unreachable -> almost certain loss
+            p = 0.02
+        else:
+            p_indiv = _clamp(1.0 - _INDIV_SLOPE * cost, _INDIV_FLOOR, _INDIV_CAP)
+            p = feas * p_indiv
+        ev += pts * (2.0 * p - 1.0)
+    return ev
+
+
+def _claude_keep_tickets(state, pid, pending, ticket_by_id, route_by_id, min_keep):
+    """Pick the max-expected-value subset of `pending` (keeping >= min_keep)."""
+    import itertools
+    adj    = _build_adj(state, pid, route_by_id)
+    ps     = state["player_states"].get(pid, {})
+    owned  = {int(r) for r, o in state["claimed_routes"].items() if o == pid}
+    trains = ps.get("trains", 45)
+
+    cand = []
+    for tid in pending:
+        t = ticket_by_id.get(tid)
+        if not t:
+            continue
+        path = _sp_rids(adj, t["city1"], t["city2"], owned)
+        if path is None:
+            cand.append((tid, t, None, 10 ** 9))           # unreachable
+        else:
+            cost = sum(route_by_id[r]["length"] for r in path if r not in owned)
+            cand.append((tid, t, set(path), cost))
+
+    if len(cand) <= min_keep:                              # no real choice
+        return [c[0] for c in cand]
+
+    best, best_ev = None, None
+    for k in range(min_keep, len(cand) + 1):
+        for combo in itertools.combinations(range(len(cand)), k):
+            ev = _subset_ev([cand[i] for i in combo], owned, route_by_id, trains)
+            if best_ev is None or ev > best_ev:
+                best_ev, best = ev, combo
+    return [cand[i][0] for i in best]
+
+
 def bot_keep_initial_tickets(state: dict, pid: str, pending: list,
                              personality: str = "fish_bot") -> list:
     """Keep tickets based on personality."""
     route_by_id, ticket_by_id = _get_map_data(state)
+
+    # claude_bot and shitter_bot use an expected-value chooser: keep finishable /
+    # overlapping tickets, drop negative-EV dead weight. Initial phase must keep
+    # >= 2; mid-game ticket draws may keep just 1.
+    if personality in ("claude_bot", "shitter_bot"):
+        min_keep = 2 if state.get("phase") == "initial_tickets" else 1
+        keep = _claude_keep_tickets(state, pid, pending, ticket_by_id,
+                                    route_by_id, min_keep)
+        if len(keep) >= min_keep:
+            return keep
+        # Fall through to the generic logic if something went wrong.
+
     adj = _build_adj(state, pid, route_by_id)
 
     keepable, blocked = [], []

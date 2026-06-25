@@ -364,6 +364,38 @@ def test_fish_bot_keeps_high_value_tickets(two_player_specs):
     assert max(kept_values) == pending_values[0]
 
 
+def test_claude_bot_keeps_affordable_opening(two_player_specs):
+    # At game start (45 trains) claude_bot should keep all reachable tickets —
+    # an affordable plan has no dead weight to drop. Matches winner behavior.
+    state = make_state(two_player_specs)
+    pid = "1"
+    pending = state["player_states"][pid]["pending_tickets"]
+    keep = bot_keep_initial_tickets(state, pid, pending, "claude_bot")
+    assert len(keep) == len(pending)
+    assert all(k in pending for k in keep)
+
+
+def test_claude_bot_drops_unbuildable_midgame_ticket(two_player_specs):
+    # Mid-game with very few trains left, claude_bot must NOT keep a long ticket
+    # it cannot possibly build, while a greedy keep-all bot would.
+    from game_data_na import TICKET_BY_ID
+    state = make_state(two_player_specs)
+    state["phase"] = "main"
+    pid = "1"
+    state["player_states"][pid]["trains"] = 6
+    # longest (coast-to-coast) + the two cheapest tickets
+    by_pts = sorted(TICKET_BY_ID.values(), key=lambda t: t["points"])
+    pending = [by_pts[-1]["id"], by_pts[0]["id"], by_pts[1]["id"]]
+    state["player_states"][pid]["pending_tickets"] = pending
+
+    keep = bot_keep_initial_tickets(state, pid, pending, "claude_bot")
+    assert len(keep) >= 1                       # mid-game minimum
+    assert by_pts[-1]["id"] not in keep         # the unbuildable long ticket is dropped
+    # the keep-all baseline would have kept everything
+    fish = bot_keep_initial_tickets(state, pid, pending, "fish_bot")
+    assert len(keep) < len(fish)
+
+
 # ---------------------------------------------------------------------------
 # Bot locomotive face-up detection (the "loco" vs "locomotive" bug)
 # ---------------------------------------------------------------------------

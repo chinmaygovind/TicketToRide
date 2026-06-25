@@ -51,8 +51,15 @@ All state lives in `Game.state_json`. `game_logic.py` mutates it in place; `app.
 ### Bot System (`bot.py`)
 `bot_turn(state, pid, personality)` is the public API called by `app.py`.  
 `bot_keep_initial_tickets(state, pid, pending, personality)` handles initial ticket selection.  
-Personalities: `fish_bot`, `chin_bot`, `rocket_bot`, `ticket_bot`, `chaos_bot`, `claude_bot`.  
-`claude_bot` loads weights from `claude-bot/model/claude_bot_weights.json` if it exists.
+Personalities: `fish_bot`, `chin_bot`, `rocket_bot`, `ticket_bot`, `chaos_bot`,
+`greedy_bot`, `blocking_bot`, `claude_bot`, `shitter_bot`.
+- `claude_bot` — ISMCTS engine in `claude-bot/`; live default `CLAUDE_BOT_ITER=0`
+  runs the instant `ticket_path_policy` (builds each ticket's connecting path).
+- `shitter_bot` — sophisticated instant policy in its own `shitter-bot/` folder
+  (`shitter-bot/policy.py`, loaded lazily by `bot.py:_shitter_turn`). Prioritises
+  completing tickets via slightly longer/longer-route paths, keeps one continuous
+  network for the longest-path bonus, and blocks opponent bridge routes when free.
+Both use the expected-value ticket chooser in `bot.py:_claude_keep_tickets`.
 
 ### Socket Events
 After every action `_broadcast_state(game, code)` sends:

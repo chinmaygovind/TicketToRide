@@ -11,6 +11,7 @@ _PARENT = os.path.dirname(_HERE)
 sys.path.insert(0, _PARENT)
 sys.path.insert(0, _HERE)
 
+import heapq
 import random
 import game_logic as logic
 from adapter import get_legal_moves, apply_move, is_terminal, terminal_score, current_player
@@ -157,6 +158,130 @@ def heuristic_policy(state: dict, pid: str) -> tuple:
             return "draw_face_up", {"slot": i}
 
     return "draw_blind", {}
+
+
+# ---------------------------------------------------------------------------
+# Ticket-path policy — COMMITS to building each ticket's connecting path
+#
+# The plain heuristic grabs whichever single route scores highest (length +
+# fuzzy ticket halo) and so claims scattered "relevant" routes that never join
+# up — rollouts finish ~0 tickets, leaving ISMCTS blind to ticket value. This
+# policy instead computes the actual shortest *route path* between an incomplete
+# ticket's two cities (over routes still available to us, already-owned = free)
+# and claims the next route ON that path, focusing the ticket closest to done.
+# That builds connected networks that actually complete tickets.
+# ---------------------------------------------------------------------------
+
+def _available_adj(state: dict, pid: str) -> dict:
+    """Adjacency over routes still usable by pid (owned cost 0, opponent = blocked)."""
+    claimed   = state["claimed_routes"]
+    n_players = len(state.get("turn_order", []))
+    adj: dict = {}
+    for rid, r in ROUTE_BY_ID.items():
+        owner = claimed.get(str(rid))
+        if owner is not None and owner != pid:
+            continue                                   # opponent owns this side
+        if owner is None and n_players <= 3:
+            partner = DOUBLE_ROUTE_PARTNER.get(rid)    # double route, ≤3p: one side only
+            if partner and str(partner) in claimed:
+                continue
+        cost = 0 if owner == pid else r["length"]
+        adj.setdefault(r["city1"], []).append((cost, r["city2"], rid))
+        adj.setdefault(r["city2"], []).append((cost, r["city1"], rid))
+    return adj
+
+
+def _path_route_ids(adj: dict, start: str, end: str):
+    """Dijkstra over available routes; return route-id list of the cheapest path, or None."""
+    if start == end:
+        return []
+    dist = {start: 0}
+    prev = {}
+    heap = [(0, start)]
+    while heap:
+        d, city = heapq.heappop(heap)
+        if city == end:
+            path, cur = [], end
+            while cur in prev:
+                pc, rid = prev[cur]
+                path.append(rid)
+                cur = pc
+            return list(reversed(path))
+        if d > dist.get(city, float("inf")):
+            continue
+        for cost, nbr, rid in adj.get(city, []):
+            nd = d + cost
+            if nd < dist.get(nbr, float("inf")):
+                dist[nbr] = nd
+                prev[nbr] = (city, rid)
+                heapq.heappush(heap, (nd, nbr))
+    return None
+
+
+def ticket_path_policy(state: dict, pid: str) -> tuple:
+    ps        = state["player_states"].get(pid, {})
+    hand      = ps.get("hand", {})
+    trains    = ps.get("trains", 45)
+    tickets   = ps.get("tickets", [])
+    draw_step = state.get("draw_step", 0)
+    face_up   = state["face_up"]
+    claimed   = state["claimed_routes"]
+    n_players = len(state.get("turn_order", []))
+    locos     = hand.get("locomotive", 0)
+    sorted_hand = sorted(
+        ((c, n) for c, n in hand.items() if c != "locomotive" and n > 0),
+        key=lambda x: -x[1],
+    )
+
+    # Incomplete tickets -> their still-needed (unclaimed) routes, by remaining trains.
+    adj = _available_adj(state, pid)
+    targets = []   # (remaining_trains, points, [needed route ids])
+    for tid in tickets:
+        t = TICKET_BY_ID.get(tid)
+        if not t or logic.is_path_connected(state, pid, t["city1"], t["city2"]):
+            continue
+        path = _path_route_ids(adj, t["city1"], t["city2"])
+        if not path:
+            continue                                   # currently unreachable — don't chase it
+        need = [rid for rid in path if str(rid) not in claimed]
+        remaining = sum(ROUTE_BY_ID[rid]["length"] for rid in need)
+        targets.append((remaining, t.get("points", 0), need))
+
+    if targets:
+        # Focus the ticket closest to completion (then highest points).
+        targets.sort(key=lambda x: (x[0], -x[1]))
+
+        # 1) Claim a route on a target path if we can afford one (longest = most progress).
+        if draw_step == 0:
+            for _remaining, _pts, need in targets:
+                claimable = []
+                for rid in need:
+                    route = ROUTE_BY_ID[rid]
+                    cards = _can_claim_fast(hand, route, trains, n_players, claimed, pid,
+                                            sorted_hand, locos)
+                    if cards is not None:
+                        claimable.append((route["length"], rid, cards))
+                if claimable:
+                    claimable.sort(reverse=True)
+                    _ln, rid, cards = claimable[0]
+                    return "claim", {"route_id": rid, "cards": cards}
+
+        # 2) Can't build yet — draw cards toward the focus ticket's needed colors.
+        need_colors: dict = {}
+        for rid in targets[0][2]:
+            col = ROUTE_BY_ID[rid].get("color", "gray")
+            if col not in ("gray", "locomotive"):
+                need_colors[col] = need_colors.get(col, 0) + ROUTE_BY_ID[rid]["length"]
+        for i, card in enumerate(face_up):              # locomotives are universally useful
+            if card == "locomotive" and draw_step == 0:
+                return "draw_face_up", {"slot": i}
+        for i, card in enumerate(face_up):
+            if card and card != "locomotive" and card in need_colors:
+                return "draw_face_up", {"slot": i}
+        return "draw_blind", {}
+
+    # No incomplete reachable tickets: maximize route points with the plain heuristic.
+    return heuristic_policy(state, pid)
 
 
 # ---------------------------------------------------------------------------

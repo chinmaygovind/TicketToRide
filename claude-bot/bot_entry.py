@@ -13,25 +13,31 @@ sys.path.insert(0, _HERE)
 
 from adapter    import get_legal_moves, apply_move, is_terminal, terminal_score, current_player
 from determinize import sample as det_sample
-from rollout    import heuristic_policy, random_policy, run_rollout
+from rollout    import heuristic_policy, random_policy, ticket_path_policy, run_rollout
 from ismcts     import ismcts
 
 # ---------------------------------------------------------------------------
 # Hyperparameters — override via env vars
 # ---------------------------------------------------------------------------
 import os as _os
-# Live default. iter=30 played too passively (drew cards ~5x per claim, only
-# ~11 routes/game); iter=60 is far more decisive (~15 routes, roughly +35 pts in
-# testing) for ~2x the think time (~1.3s/turn on dev, a few seconds on EC2 — fine
-# now that bot compute runs off the eventlet hub and has no artificial delay).
-# Raise CLAUDE_BOT_ITER for even stronger/slower play; benchmarks set it explicitly.
+# Live default: iter=0 — run the ticket-path policy DIRECTLY, no tree search.
+#
+# ISMCTS turned out to be actively harmful here: ismcts._prune_moves keeps only
+# the top-6 highest-VALUE (longest) claim moves per node, so the short len-1..3
+# routes that actually connect a ticket get pruned out of the search — the bot
+# could never select them and finished ~0 tickets (sprawled for raw route points,
+# scoring ~17-40 while humans scored 100+). The direct ticket_path_policy commits
+# to building each ticket's connecting path and, head-to-head vs fish_bot, beats
+# iter=20 ISMCTS 92% vs 83% with 2.6 vs 0.0 tickets completed — and it's instant
+# (no per-turn lag/hang). Set CLAUDE_BOT_ITER>0 to re-enable ISMCTS for experiments
+# (but fix _prune_moves to keep ticket-path routes first).
 def _cfg():
     """Read hyperparams from env at call time so they can be changed after import."""
     return {
-        "n_iter":     int(_os.environ.get("CLAUDE_BOT_ITER",    "60")),
+        "n_iter":     int(_os.environ.get("CLAUDE_BOT_ITER",    "0")),
         "ucb_c":      float(_os.environ.get("CLAUDE_BOT_C",     "1.41")),
         "max_claims": int(_os.environ.get("CLAUDE_BOT_CLAIMS",  "6")),
-        "policy":     _os.environ.get("CLAUDE_BOT_POLICY", "heuristic"),
+        "policy":     _os.environ.get("CLAUDE_BOT_POLICY", "path"),
         "use_value":  _os.environ.get("CLAUDE_BOT_VALUE",  "auto"),
     }
 
@@ -87,7 +93,12 @@ def _get_rollout_fn():
 # ---------------------------------------------------------------------------
 
 def _get_policy():
-    return heuristic_policy if _cfg()["policy"] != "random" else random_policy
+    p = _cfg()["policy"]
+    if p == "random":
+        return random_policy
+    if p == "heuristic":
+        return heuristic_policy
+    return ticket_path_policy            # default: commit to building ticket paths
 
 
 def claude_ismcts_turn(
@@ -101,9 +112,8 @@ def claude_ismcts_turn(
     cfg        = _cfg()
     policy     = _get_policy()
 
-    # Fast path: n_iter <= 0 disables ISMCTS entirely and just returns the
-    # heuristic move (~0.3ms vs ~90ms with rollouts). Used in tests, which only
-    # verify games complete — not that the bot searches. Set CLAUDE_BOT_ITER=0.
+    # n_iter <= 0 (the live default): skip ISMCTS and play the policy directly
+    # (~0.3ms, no per-turn lag). This is both the live path and the test path.
     if cfg["n_iter"] <= 0:
         return policy(state, pid)
 
