@@ -258,6 +258,52 @@ def test_socketio_add_bot(client, flask_app):
         sio.disconnect()
 
 
+def test_socketio_add_bot_specific_type(client, flask_app):
+    create_and_login(client, "bot_host_specific")
+    data = http_create_game(client)
+    code = data["code"]
+    sio = make_sio(flask_app, client)
+    try:
+        sio.emit("join_lobby", {"code": code})
+        sio.get_received()
+        sio.emit("add_bot", {"code": code, "bot_type": "claude_bot"})
+        sio.get_received()
+        from models import Game, Player
+        with flask_app.app_context():
+            game = Game.query.filter_by(code=code).first()
+            bots = [p for p in game.players if p.session_key.startswith("bot_")]
+            assert len(bots) == 1
+            assert bots[0].session_key.startswith("bot_claude_bot_")
+            assert bots[0].name == "claude-bot"
+    finally:
+        sio.disconnect()
+
+
+def test_socketio_add_bot_invalid_type_falls_back(client, flask_app):
+    create_and_login(client, "bot_host_invalid")
+    data = http_create_game(client)
+    code = data["code"]
+    sio = make_sio(flask_app, client)
+    try:
+        sio.emit("join_lobby", {"code": code})
+        sio.get_received()
+        sio.emit("add_bot", {"code": code, "bot_type": "definitely_not_a_bot"})
+        received = sio.get_received()
+        assert "player_joined" in [r["name"] for r in received]
+        import bot as bot_module
+        valid_slugs = {slug for _, slug in bot_module.BOT_TYPES}
+        from models import Game
+        with flask_app.app_context():
+            game = Game.query.filter_by(code=code).first()
+            bots = [p for p in game.players if p.session_key.startswith("bot_")]
+            assert len(bots) == 1
+            # session_key format: bot_<slug>_<uuid>; verify slug is a valid one
+            slug = bots[0].session_key[len("bot_"):].rsplit("_", 1)[0]
+            assert slug in valid_slugs
+    finally:
+        sio.disconnect()
+
+
 def test_socketio_add_bot_not_host(client, flask_app):
     create_and_login(client, "bot_host2")
     data = http_create_game(client)

@@ -463,6 +463,56 @@ html, body {
   transition: all 0.2s;
 }
 .btn-add-bot:hover { background: rgba(99,102,241,0.3); transform: translateY(-2px); }
+
+/* Split "Add Bot" button: random + caret dropdown to pick a specific bot */
+.add-bot-split { position: relative; display: inline-flex; align-items: stretch; }
+.add-bot-split .btn-add-bot {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.btn-add-bot-caret {
+  padding: 1rem 0.7rem;
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  border: 1px solid #818cf8;
+  border-left: none;
+  border-top-right-radius: 8px;
+  border-bottom-right-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.btn-add-bot-caret:hover { background: rgba(99,102,241,0.3); }
+.add-bot-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  min-width: 160px;
+  padding: 0.3rem;
+  background: #1e1b2e;
+  border: 1px solid #818cf8;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.add-bot-menu.hidden { display: none; }
+.add-bot-menu-item {
+  padding: 0.5rem 0.75rem;
+  background: transparent;
+  color: #c7d2fe;
+  border: none;
+  border-radius: 6px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  letter-spacing: 0.05em;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.add-bot-menu-item:hover { background: rgba(99,102,241,0.25); color: #fff; }
 .btn-start {
   padding: 1rem 3rem;
   background: linear-gradient(135deg, #c8a84b, #a8822b);

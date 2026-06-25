@@ -1038,7 +1038,11 @@ def lobby(code):
         return redirect(url_for("game_page", code=code.upper()))
     user = get_current_user()
     guest_name = session.get("guest_name") if not user else None
-    return render_template("lobby.html", game=game, player=player, user=user, guest_name=guest_name)
+    import bot as bot_module
+    return render_template(
+        "lobby.html", game=game, player=player, user=user,
+        guest_name=guest_name, bot_types=bot_module.BOT_TYPES,
+    )
 
 
 @app.route("/game/<code>")
@@ -1257,7 +1261,18 @@ def on_add_bot(data):
         emit("error", {"message": "No colors available."})
         return
 
-    display_name, slug = _random.choice(bot_module.BOT_TYPES)
+    # Optionally let the host pick a specific bot. Validate against BOT_TYPES;
+    # fall back to a random choice if missing/invalid.
+    requested = data.get("bot_type")
+    chosen = None
+    if requested:
+        for dn, sl in bot_module.BOT_TYPES:
+            if requested in (dn, sl):
+                chosen = (dn, sl)
+                break
+    if chosen is None:
+        chosen = _random.choice(bot_module.BOT_TYPES)
+    display_name, slug = chosen
 
     bot = Player(
         game_id=game.id,
