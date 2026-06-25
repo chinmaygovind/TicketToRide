@@ -4,10 +4,17 @@ on:
   push:
     branches: [main]
 
+# Only one deploy run at a time per branch; a new push cancels an in-progress
+# run so old/slow runs don't pile up or block the latest deploy.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test:
     name: Run pytest
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # safety net: never hang for hours on a slow/stuck test
 
     steps:
       - uses: actions/checkout@v4
