@@ -403,7 +403,7 @@ def _claude_bot_version():
     Since claude-bot/model/ is gitignored, production has no value model and so
     runs full rollouts ("auto" => off when no weights file present).
     """
-    n_iter = int(os.environ.get("CLAUDE_BOT_ITER", "30"))
+    n_iter = int(os.environ.get("CLAUDE_BOT_ITER", "60"))   # keep in sync with bot_entry._cfg()
     policy = os.environ.get("CLAUDE_BOT_POLICY", "heuristic")
     use_value = os.environ.get("CLAUDE_BOT_VALUE", "auto")
 

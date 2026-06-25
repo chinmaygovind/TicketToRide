@@ -20,14 +20,15 @@ from ismcts     import ismcts
 # Hyperparameters — override via env vars
 # ---------------------------------------------------------------------------
 import os as _os
-# Live default kept modest so a single bot turn stays snappy on the small EC2
-# instance (full ISMCTS rollouts are pure-Python CPU work; ~0.6s/turn on a dev
-# machine at iter=30, a few seconds on weaker hardware). Raise CLAUDE_BOT_ITER
-# for stronger (but slower) play; benchmarks set it explicitly.
+# Live default. iter=30 played too passively (drew cards ~5x per claim, only
+# ~11 routes/game); iter=60 is far more decisive (~15 routes, roughly +35 pts in
+# testing) for ~2x the think time (~1.3s/turn on dev, a few seconds on EC2 — fine
+# now that bot compute runs off the eventlet hub and has no artificial delay).
+# Raise CLAUDE_BOT_ITER for even stronger/slower play; benchmarks set it explicitly.
 def _cfg():
     """Read hyperparams from env at call time so they can be changed after import."""
     return {
-        "n_iter":     int(_os.environ.get("CLAUDE_BOT_ITER",    "30")),
+        "n_iter":     int(_os.environ.get("CLAUDE_BOT_ITER",    "60")),
         "ucb_c":      float(_os.environ.get("CLAUDE_BOT_C",     "1.41")),
         "max_claims": int(_os.environ.get("CLAUDE_BOT_CLAIMS",  "6")),
         "policy":     _os.environ.get("CLAUDE_BOT_POLICY", "heuristic"),
