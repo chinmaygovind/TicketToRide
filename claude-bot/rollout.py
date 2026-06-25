@@ -160,6 +160,110 @@ def heuristic_policy(state: dict, pid: str) -> tuple:
 
 
 # ---------------------------------------------------------------------------
+# Greedy policy — ticket-grabber; claims any route with ticket synergy
+# ---------------------------------------------------------------------------
+
+def greedy_policy(state: dict, pid: str) -> tuple:
+    """Aggressive ticket completion; low threshold for claiming."""
+    ps        = state["player_states"].get(pid, {})
+    hand      = ps.get("hand", {})
+    trains    = ps.get("trains", 45)
+    tickets   = ps.get("tickets", [])
+    draw_step = state.get("draw_step", 0)
+    face_up   = state["face_up"]
+    claimed   = state["claimed_routes"]
+    n_players = len(state.get("turn_order", []))
+    locos     = hand.get("locomotive", 0)
+
+    sorted_hand = sorted(
+        ((c, n) for c, n in hand.items() if c != "locomotive" and n > 0),
+        key=lambda x: -x[1],
+    )
+
+    ticket_bonus: dict[int, float] = {}
+    for tid in tickets:
+        t = TICKET_BY_ID.get(tid)
+        if not t or logic.is_path_connected(state, pid, t["city1"], t["city2"]):
+            continue
+        for rid, bonus in TICKET_ROUTE_RELEVANCE.get(tid, ()):
+            if str(rid) not in claimed:
+                ticket_bonus[rid] = ticket_bonus.get(rid, 0) + bonus
+
+    # Claim any route with positive ticket bonus (no patience required)
+    if draw_step == 0 and ticket_bonus:
+        best_rid, best_cards, best_score = None, None, -1.0
+        for _, rid, route in ROUTES_BY_VALUE:
+            if rid not in ticket_bonus:
+                continue
+            cards = _can_claim_fast(hand, route, trains, n_players, claimed, pid,
+                                    sorted_hand, locos)
+            if cards is None:
+                continue
+            score = ticket_bonus[rid]
+            if score > best_score:
+                best_score = score; best_rid = rid; best_cards = cards
+        if best_rid is not None:
+            return "claim", {"route_id": best_rid, "cards": best_cards}
+
+    # Fall back to heuristic for draws and non-ticket routes
+    return heuristic_policy(state, pid)
+
+
+# ---------------------------------------------------------------------------
+# Blocking policy — prioritises routes adjacent to the opponent's network
+# ---------------------------------------------------------------------------
+
+def blocking_policy(state: dict, pid: str) -> tuple:
+    """Claims routes that extend or complete the opponent's network first."""
+    ps        = state["player_states"].get(pid, {})
+    hand      = ps.get("hand", {})
+    trains    = ps.get("trains", 45)
+    draw_step = state.get("draw_step", 0)
+    face_up   = state["face_up"]
+    claimed   = state["claimed_routes"]
+    n_players = len(state.get("turn_order", []))
+    locos     = hand.get("locomotive", 0)
+
+    sorted_hand = sorted(
+        ((c, n) for c, n in hand.items() if c != "locomotive" and n > 0),
+        key=lambda x: -x[1],
+    )
+
+    # Build opponent city set
+    opp_cities: set = set()
+    for rid_str, owner in claimed.items():
+        if owner != pid:
+            r = ROUTE_BY_ID.get(int(rid_str))
+            if r:
+                opp_cities.add(r["city1"]); opp_cities.add(r["city2"])
+
+    if draw_step == 0 and opp_cities:
+        best_rid, best_cards, best_score = None, None, -1.0
+        for _, rid, route in ROUTES_BY_VALUE:
+            cards = _can_claim_fast(hand, route, trains, n_players, claimed, pid,
+                                    sorted_hand, locos)
+            if cards is None:
+                continue
+            c1_opp = route["city1"] in opp_cities
+            c2_opp = route["city2"] in opp_cities
+            if c1_opp and c2_opp:
+                block_bonus = 8.0
+            elif c1_opp or c2_opp:
+                block_bonus = 3.0
+            else:
+                continue   # only consider blocking moves
+            ln = route["length"]
+            score = block_bonus + ln  # base route value
+            if score > best_score:
+                best_score = score; best_rid = rid; best_cards = cards
+        if best_rid is not None:
+            return "claim", {"route_id": best_rid, "cards": best_cards}
+
+    # Fall back to heuristic
+    return heuristic_policy(state, pid)
+
+
+# ---------------------------------------------------------------------------
 # Full game rollout
 # ---------------------------------------------------------------------------
 

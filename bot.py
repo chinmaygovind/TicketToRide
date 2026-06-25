@@ -19,12 +19,14 @@ import random
 from collections import defaultdict
 
 BOT_TYPES = [
-    ("fish-bot",   "fish_bot"),
-    ("chin-bot",   "chin_bot"),
-    ("rocket-bot", "rocket_bot"),
-    ("ticket-bot", "ticket_bot"),
-    ("chaos-bot",  "chaos_bot"),
-    ("claude-bot", "claude_bot"),
+    ("fish-bot",      "fish_bot"),
+    ("chin-bot",      "chin_bot"),
+    ("rocket-bot",    "rocket_bot"),
+    ("ticket-bot",    "ticket_bot"),
+    ("chaos-bot",     "chaos_bot"),
+    ("greedy-bot",    "greedy_bot"),
+    ("blocking-bot",  "blocking_bot"),
+    ("claude-bot",    "claude_bot"),
 ]
 
 # route length -> priority weight for long-route-focused bots
@@ -549,13 +551,130 @@ def _claude_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step,
     return "draw_blind", {}
 
 
+# ---------------------------------------------------------------------------
+# greedy-bot: Ticket Grabber
+# Draws destination tickets aggressively and claims the best ticket-synergy
+# route every turn regardless of length.  CLAIM_THRESHOLD = 0 (claim anything
+# with positive score).  Provides a distinct style vs fish_bot for training.
+# ---------------------------------------------------------------------------
+
+def _greedy_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
+    from game_logic import is_path_connected
+    ps = state["player_states"].get(pid, {})
+    tickets = ps.get("tickets", [])
+    uncompleted = [
+        t for tid in tickets
+        if (t := ticket_by_id.get(tid))
+        and not is_path_connected(state, pid, t["city1"], t["city2"])
+    ]
+
+    # Very high ticket weight so any route that helps a ticket is claimed
+    scored = _score_routes_weighted(
+        state, pid, route_by_id, ticket_by_id,
+        length_weights=_FAST_WEIGHT,   # ok with short routes
+        ticket_weight=8.0,             # tickets dominate
+        chain_bonus=1.0,
+    )
+
+    if draw_step == 0:
+        route, cards = _best_claimable(scored, route_by_id, claimed, hand, trains)
+        if route:
+            return "claim", {"route_id": route["id"], "cards": cards}
+
+    # Draw tickets whenever possible (greedy always wants more)
+    if draw_step == 0 and state.get("phase") == "main" and _has_dest_deck(state):
+        if len(uncompleted) <= 3:
+            return "draw_tickets", {}
+
+    if draw_step == 0:
+        for i, card in enumerate(face_up):
+            if card == "locomotive":
+                return "draw_face_up", {"slot": i}
+
+    needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
+    for i, card in enumerate(face_up):
+        if card in needed:
+            return "draw_face_up", {"slot": i}
+
+    return "draw_blind", {}
+
+
+# ---------------------------------------------------------------------------
+# blocking-bot: The Blocker
+# Claims routes that the opponent needs (adjacent to their network endpoints),
+# even at the cost of its own efficiency.  Falls back to fish_bot strategy
+# when no high-value blocking opportunity exists.
+# ---------------------------------------------------------------------------
+
+def _blocking_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
+    if draw_step != 0:
+        # On the second card draw, just use fish_bot logic
+        scored = _score_routes_weighted(
+            state, pid, route_by_id, ticket_by_id,
+            length_weights=_LONG_WEIGHT, ticket_weight=0.5, chain_bonus=1.5,
+        )
+        needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
+        for i, card in enumerate(face_up):
+            if card in needed:
+                return "draw_face_up", {"slot": i}
+        return "draw_blind", {}
+
+    # Find all cities in the opponent's claimed network
+    opp_cities: set = set()
+    for rid_str, owner in claimed.items():
+        if owner != pid:
+            r = route_by_id.get(int(rid_str))
+            if r:
+                opp_cities.add(r["city1"])
+                opp_cities.add(r["city2"])
+
+    # Score routes with a blocking bonus on top of normal scoring
+    scored = _score_routes_weighted(
+        state, pid, route_by_id, ticket_by_id,
+        length_weights=_LONG_WEIGHT, ticket_weight=0.5, chain_bonus=1.5,
+    )
+    # Add blocking bonus: routes where BOTH endpoints are in opponent's network
+    # are most valuable to block (completing their chain); one endpoint is lesser
+    blocking_scored = {}
+    for rid, base_score in scored.items():
+        r = route_by_id.get(rid)
+        if r is None:
+            continue
+        c1_opp = r["city1"] in opp_cities
+        c2_opp = r["city2"] in opp_cities
+        if c1_opp and c2_opp:
+            blocking_scored[rid] = base_score + 8.0   # strong block
+        elif c1_opp or c2_opp:
+            blocking_scored[rid] = base_score + 3.0   # moderate block
+        else:
+            blocking_scored[rid] = base_score
+
+    route, cards = _best_claimable(blocking_scored, route_by_id, claimed, hand, trains)
+    if route:
+        return "claim", {"route_id": route["id"], "cards": cards}
+
+    if draw_step == 0:
+        for i, card in enumerate(face_up):
+            if card == "locomotive":
+                return "draw_face_up", {"slot": i}
+
+    needed = _needed_colors_for_scores(state, pid, route_by_id, scored)
+    for i, card in enumerate(face_up):
+        if card in needed:
+            return "draw_face_up", {"slot": i}
+
+    return "draw_blind", {}
+
+
 _DISPATCH = {
-    "fish_bot":   _fish_turn,
-    "chin_bot":   _chin_turn,
-    "rocket_bot": _rocket_turn,
-    "ticket_bot": _ticket_turn,
-    "chaos_bot":  _chaos_turn,
-    "claude_bot": _claude_turn,
+    "fish_bot":     _fish_turn,
+    "chin_bot":     _chin_turn,
+    "rocket_bot":   _rocket_turn,
+    "ticket_bot":   _ticket_turn,
+    "chaos_bot":    _chaos_turn,
+    "greedy_bot":   _greedy_turn,
+    "blocking_bot": _blocking_turn,
+    "claude_bot":   _claude_turn,
 }
 
 

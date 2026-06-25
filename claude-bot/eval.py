@@ -22,7 +22,8 @@ import multiprocessing
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--games",   type=int, default=100)
-parser.add_argument("--opp",     type=str, default="fish_bot")
+parser.add_argument("--opp",     type=str, default="fish_bot",
+                    help="Opponent personality, or 'ladder' to run full evaluation ladder")
 parser.add_argument("--seed",    type=int, default=0)
 parser.add_argument("--claude",  type=str, default="claude_bot")
 parser.add_argument("--iter",    type=int, default=40,
@@ -66,10 +67,15 @@ def _worker_init(iter_val: str, policy_val: str):
 # Headless 2-player game runner
 # ---------------------------------------------------------------------------
 
-def run_game(personality_a: str, personality_b: str, seed: int) -> dict:
+def run_game(personality_a: str, personality_b: str, seed: int,
+             snapshot_fn=None) -> dict:
     """
     Run one complete 2-player game.
     Returns {"a_score": int, "b_score": int, "winner": "a"|"b"|"tie", "turns": int}
+
+    snapshot_fn: optional callable(state, pid) called at the start of each
+    draw_step==0 turn for personality_a's pid ("1").  Used to collect training
+    data from ISMCTS games without a second game-runner loop.
     """
     random.seed(seed)
 
@@ -129,6 +135,10 @@ def run_game(personality_a: str, personality_b: str, seed: int) -> dict:
             if not logic.draw_blind(state, cur_pid).get("ok"):
                 logic._next_turn(state)
             continue
+
+        # Snapshot current state for training data collection (personality_a only)
+        if snapshot_fn is not None and cur_pid == "1" and ds == 0:
+            snapshot_fn(state, cur_pid)
 
         fn = bot_module._DISPATCH.get(pers, bot_module._fish_turn)
         h  = dict(ps.get("hand", {}))
@@ -300,8 +310,66 @@ def print_report(r: dict):
     print(sep)
 
 
+# ---------------------------------------------------------------------------
+# Evaluation ladder — run vs all standard opponents, report table
+# ---------------------------------------------------------------------------
+
+# The held-out ladder opponents: never trained against, diverse styles.
+# Ordered from weakest to strongest expected.
+LADDER_RUNGS = [
+    "chaos_bot",      # random noise / nearly random
+    "greedy_bot",     # aggressive ticket-grabber
+    "blocking_bot",   # blocker variant
+    "rocket_bot",     # speed / early-spread
+    "ticket_bot",     # ticket completionist
+    "chin_bot",       # balanced collector
+    "fish_bot",       # patient long-route (primary benchmark)
+]
+
+
+def ladder(n_games: int, claude_pers: str = "claude_bot", base_seed: int = 0,
+           n_workers: int = 1) -> list:
+    """
+    Run claude_pers vs every rung in LADDER_RUNGS.
+    Returns list of result dicts (one per rung), best-to-worst by win_rate.
+    Flags regression if win_rate < 0.50 against any rung.
+    """
+    results = []
+    sep = "=" * 58
+    print(sep)
+    print(f"  Evaluation Ladder  --  {claude_pers}  ({n_games} games/rung)")
+    print(sep)
+    print(f"  {'Opponent':<14}  {'W/L/T':>9}  {'WR':>6}  {'AvgDiff':>8}  {'ClaudeAvg':>10}")
+    print(f"  {'-'*14}  {'-'*9}  {'-'*6}  {'-'*8}  {'-'*10}")
+
+    for opp in LADDER_RUNGS:
+        r = benchmark(n_games, claude_pers, opp, base_seed, n_workers)
+        wlt = f"{r['wins']}/{r['losses']}/{r['ties']}"
+        flag = "  <<REGRESSION" if r["win_rate"] < 0.50 else ""
+        print(f"  {opp:<14}  {wlt:>9}  {r['win_rate']:>5.1%}  "
+              f"{r['mean_diff']:>+8.1f}  {r['mean_claude']:>10.1f}{flag}")
+        results.append(r)
+
+    overall_wr = sum(r["wins"] for r in results) / (n_games * len(LADDER_RUNGS))
+    overall_diff = sum(r["mean_diff"] for r in results) / len(LADDER_RUNGS)
+    print(sep)
+    print(f"  Overall WR: {overall_wr:.1%}  |  Mean diff across rungs: {overall_diff:+.1f}")
+    print(sep)
+    return results
+
+
+def ladder_score(results: list) -> float:
+    """Single scalar: mean win_rate across all rungs. Used for checkpoint selection."""
+    if not results:
+        return 0.0
+    return sum(r["win_rate"] for r in results) / len(results)
+
+
 if __name__ == "__main__":
     multiprocessing.freeze_support()   # required for Windows spawn
     args = parser.parse_args()
-    r = benchmark(args.games, args.claude, args.opp, args.seed, args.workers)
-    print_report(r)
+    if args.opp == "ladder":
+        ladder(args.games, args.claude, args.seed, args.workers)
+    else:
+        r = benchmark(args.games, args.claude, args.opp, args.seed, args.workers)
+        print_report(r)
