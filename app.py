@@ -396,13 +396,42 @@ def toggle_notify():
     return jsonify({"ok": True, "notify": user.notify_new_game})
 
 
+def _claude_bot_version():
+    """Human-readable summary of the claude_bot engine config currently live.
+
+    Sourced from the same env vars / defaults as claude-bot/bot_entry.py:_cfg().
+    Since claude-bot/model/ is gitignored, production has no value model and so
+    runs full rollouts ("auto" => off when no weights file present).
+    """
+    n_iter = int(os.environ.get("CLAUDE_BOT_ITER", "30"))
+    policy = os.environ.get("CLAUDE_BOT_POLICY", "heuristic")
+    use_value = os.environ.get("CLAUDE_BOT_VALUE", "auto")
+
+    # Mirror _get_rollout_fn(): value model only used if its weights file exists.
+    value_weights = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "claude-bot", "model", "value_weights.json")
+    has_value_model = (use_value != "off") and os.path.exists(value_weights)
+    eval_mode = "value-net" if has_value_model else "full-rollout"
+
+    if n_iter <= 0:
+        engine = "heuristic"   # ISMCTS disabled (e.g. tests / CLAUDE_BOT_ITER=0)
+        return f"claude_bot engine: {engine} · {policy}-policy"
+
+    return (f"claude_bot engine: ISMCTS · iter={n_iter} · "
+            f"{policy}-policy · {eval_mode}")
+
+
 @app.route("/account")
 @require_login
 def account_page():
     user = get_current_user()
     if not user:
         return redirect(url_for("login_page"))
-    return render_template("account.html", user=user)
+    return render_template("account.html", user=user,
+                           git_version_name=GIT_VERSION_NAME,
+                           git_commit_url=GIT_COMMIT_URL,
+                           claude_bot_version=_claude_bot_version())
 
 
 @app.route("/account/history")

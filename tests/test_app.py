@@ -464,6 +464,8 @@ def test_account_page_accessible(client):
     create_and_login(client, "account_user")
     resp = client.get("/account")
     assert resp.status_code == 200
+    # Footer should advertise the live claude_bot engine config.
+    assert b"claude_bot engine" in resp.data
 
 
 def test_account_update_username(client):
