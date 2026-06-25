@@ -17,6 +17,12 @@ os.environ.setdefault("DATABASE_URL", f"sqlite:///{_TEST_DB_PATH}")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-pytest")
 os.environ.setdefault("FLASK_ENV", "testing")
 
+# claude_bot uses ISMCTS, which is slow at the default 100 iterations (~2s/turn).
+# Tests only verify that games COMPLETE without crashing, not that the bot plays
+# well, so run with minimal iterations to keep the suite fast. bot_entry reads
+# this env var at call time, so setting it here (before any import) is sufficient.
+os.environ.setdefault("CLAUDE_BOT_ITER", "4")
+
 import pytest
 
 

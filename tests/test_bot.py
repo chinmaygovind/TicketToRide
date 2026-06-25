@@ -383,9 +383,12 @@ def test_bot_detects_face_up_locomotive(personality, main_state):
     # Key assertion: bot must not crash even with locomotive in face_up
 
 
-@pytest.mark.parametrize("personality", ["fish_bot", "chin_bot", "rocket_bot", "ticket_bot", "claude_bot"])
+# claude_bot excluded: it is an ISMCTS search bot, not a heuristic loco-seeker.
+# Its card choice is emergent and depends on search depth, so a deterministic
+# "always grab the locomotive" assertion does not apply to it.
+@pytest.mark.parametrize("personality", ["fish_bot", "chin_bot", "rocket_bot", "ticket_bot"])
 def test_loco_seeking_bots_grab_locomotive_first(personality, main_state):
-    """Non-chaos bots that prioritize locos should pick the locomotive slot."""
+    """Non-chaos heuristic bots that prioritize locos should pick the locomotive slot."""
     state = main_state
     pid = state["current_player_id"]
     # No cards and no claimable routes → bot must draw

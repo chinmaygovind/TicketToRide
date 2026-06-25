@@ -20,11 +20,15 @@ from ismcts     import ismcts
 # Hyperparameters — override via env vars
 # ---------------------------------------------------------------------------
 import os as _os
-N_ITER       = int(_os.environ.get("CLAUDE_BOT_ITER",    "100"))
-UCB_C        = float(_os.environ.get("CLAUDE_BOT_C",     "1.41"))
-MAX_CLAIMS   = int(_os.environ.get("CLAUDE_BOT_CLAIMS",  "6"))
-_POLICY_NAME = _os.environ.get("CLAUDE_BOT_POLICY", "heuristic")  # "heuristic"|"random"
-_USE_VALUE   = _os.environ.get("CLAUDE_BOT_VALUE",  "auto")       # "auto"|"on"|"off"
+def _cfg():
+    """Read hyperparams from env at call time so they can be changed after import."""
+    return {
+        "n_iter":     int(_os.environ.get("CLAUDE_BOT_ITER",    "100")),
+        "ucb_c":      float(_os.environ.get("CLAUDE_BOT_C",     "1.41")),
+        "max_claims": int(_os.environ.get("CLAUDE_BOT_CLAIMS",  "6")),
+        "policy":     _os.environ.get("CLAUDE_BOT_POLICY", "heuristic"),
+        "use_value":  _os.environ.get("CLAUDE_BOT_VALUE",  "auto"),
+    }
 
 # ---------------------------------------------------------------------------
 # Value function — loaded lazily; falls back to rollout if model not found
@@ -46,7 +50,7 @@ def _get_rollout_fn():
     """
     global _value_model
 
-    if _USE_VALUE == "off":
+    if _cfg()["use_value"] == "off":
         return run_rollout
 
     if _value_model is None:
@@ -78,7 +82,7 @@ def _get_rollout_fn():
 # ---------------------------------------------------------------------------
 
 def _get_policy():
-    return heuristic_policy if _POLICY_NAME != "random" else random_policy
+    return heuristic_policy if _cfg()["policy"] != "random" else random_policy
 
 
 def claude_ismcts_turn(
@@ -89,6 +93,7 @@ def claude_ismcts_turn(
     Drop-in replacement for _claude_turn in bot.py.
     Signature matches the internal turn-function signature used by _DISPATCH.
     """
+    cfg        = _cfg()
     policy     = _get_policy()
     rollout_fn = _get_rollout_fn()
 
@@ -99,8 +104,8 @@ def claude_ismcts_turn(
     return ismcts(
         state              = state,
         observer_pid       = pid,
-        n_iter             = N_ITER,
-        c                  = UCB_C,
+        n_iter             = cfg["n_iter"],
+        c                  = cfg["ucb_c"],
         sample_fn          = det_sample,
         rollout_policy_fn  = policy,
         get_legal_moves_fn = get_legal_moves,
@@ -109,5 +114,5 @@ def claude_ismcts_turn(
         score_fn           = terminal_score,
         current_player_fn  = current_player,
         rollout_fn         = rollout_fn,
-        max_claims         = MAX_CLAIMS,
+        max_claims         = cfg["max_claims"],
     )

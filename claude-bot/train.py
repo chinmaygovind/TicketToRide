@@ -27,6 +27,7 @@ import argparse
 import random
 import copy
 import time
+import json
 
 import game_logic as logic
 import bot as bot_module
@@ -123,45 +124,61 @@ def collect_data(n_games: int, sample_every: int = 3) -> tuple:
 # ISMCTS-game data collection (correct training distribution)
 # ---------------------------------------------------------------------------
 
-def collect_ismcts_data(n_games: int, opp: str = "fish_bot") -> tuple:
+_DATA_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "model", "training_data.json")
+
+
+def collect_ismcts_data(n_games: int, opp: str = "fish_bot",
+                        n_iter: int = 20) -> tuple:
     """
     Run ISMCTS-vs-opp games and collect (features, final_score) pairs.
-    Uses the real ISMCTS bot (not heuristic_policy) so the training distribution
-    matches what the value function will see at inference time.
+    Saves to disk after every game so progress survives a kill.
+    n_iter controls ISMCTS depth during data collection (lower = faster games).
     """
     import importlib.util as _ilu
 
-    # Import eval.run_game.  eval.py's module-level code sets CLAUDE_BOT_ITER to
-    # its default (40) when exec'd — we want 40 anyway for speed, and must keep
-    # the value model off so the training states come from pure rollout ISMCTS.
     _eval_path = os.path.join(os.path.dirname(__file__), "eval.py")
     spec = _ilu.spec_from_file_location("eval_mod", _eval_path)
     eval_mod = _ilu.module_from_spec(spec)
-    spec.loader.exec_module(eval_mod)        # sets CLAUDE_BOT_ITER=40 (eval default)
-    os.environ["CLAUDE_BOT_VALUE"] = "off"  # never use stale value model for data gen
+    spec.loader.exec_module(eval_mod)
+    os.environ["CLAUDE_BOT_VALUE"] = "off"
+    os.environ["CLAUDE_BOT_ITER"] = str(n_iter)  # override for fast data collection
 
-    X, y = [], []
+    # Load existing data so we can resume or accumulate
+    os.makedirs(os.path.dirname(_DATA_FILE), exist_ok=True)
+    if os.path.exists(_DATA_FILE):
+        with open(_DATA_FILE) as f:
+            saved = json.load(f)
+        X, y = saved["X"], saved["y"]
+        start_seed = saved.get("n_games", 0)
+        print(f"  Resuming: loaded {len(X)} existing samples (from {start_seed} games)", flush=True)
+    else:
+        X, y = [], []
+        start_seed = 0
+
     t0 = time.time()
-
     for i in range(n_games):
+        seed = start_seed + i
         snapshots = []
 
         def _snap(state, pid, _buf=snapshots):
             _buf.append(extract(state, pid))
 
-        # Always claude in seat A so snapshot_fn fires for claude's turns
-        result = eval_mod.run_game("claude_bot", opp, seed=i,
-                                   snapshot_fn=_snap)
+        result = eval_mod.run_game("claude_bot", opp, seed=seed, snapshot_fn=_snap)
         final_diff = (result["a_score"] - result["b_score"]) / 100.0
 
         for feat in snapshots:
             X.append(feat)
             y.append(final_diff)
 
-        if (i + 1) % 10 == 0 or i == n_games - 1:
-            elapsed = time.time() - t0
-            print(f"  collected {i+1}/{n_games} ISMCTS games  "
-                  f"({len(X)} samples, {elapsed:.1f}s)")
+        # Save to disk after every game so a kill loses at most 1 game
+        with open(_DATA_FILE, "w") as f:
+            json.dump({"X": X, "y": y, "n_games": start_seed + i + 1}, f)
+
+        elapsed = time.time() - t0
+        rate = (i + 1) / elapsed
+        remaining = (n_games - i - 1) / rate if rate > 0 else 0
+        print(f"  game {i+1}/{n_games}  samples={len(X)}  "
+              f"{elapsed:.0f}s elapsed  ~{remaining:.0f}s left", flush=True)
 
     return X, y
 
@@ -171,16 +188,17 @@ def collect_ismcts_data(n_games: int, opp: str = "fish_bot") -> tuple:
 # ---------------------------------------------------------------------------
 
 def train(n_games: int = 200, model_type: str = "linear",
-          sample_every: int = 3, use_ismcts: bool = False) -> ValueModel:
+          sample_every: int = 3, use_ismcts: bool = False,
+          n_iter: int = 20) -> ValueModel:
     if use_ismcts:
-        print(f"\n=== Collecting ISMCTS data ({n_games} games) ===")
-        X, y = collect_ismcts_data(n_games)
+        print(f"\n=== Collecting ISMCTS data ({n_games} games, iter={n_iter}) ===", flush=True)
+        X, y = collect_ismcts_data(n_games, n_iter=n_iter)
     else:
-        print(f"\n=== Collecting data ({n_games} games, sample every {sample_every} turns) ===")
+        print(f"\n=== Collecting data ({n_games} games, sample every {sample_every} turns) ===", flush=True)
         X, y = collect_data(n_games, sample_every)
-    print(f"  Total samples: {len(X)}")
+    print(f"  Total samples: {len(X)}", flush=True)
 
-    print(f"\n=== Training {model_type} value model ===")
+    print(f"\n=== Training {model_type} value model ===", flush=True)
     if model_type == "mlp":
         model = ValueModel.new_mlp()
         model.fit(X, y, lr=0.005, epochs=100)
@@ -189,10 +207,10 @@ def train(n_games: int = 200, model_type: str = "linear",
         model.fit(X, y, lr=0.005, epochs=500)
 
     train_mse = model.mse(X, y)
-    print(f"  Train MSE: {train_mse:.4f}  (RMSE: {train_mse**0.5:.4f})")
+    print(f"  Train MSE: {train_mse:.4f}  (RMSE: {train_mse**0.5:.4f})", flush=True)
 
     model.save()
-    print(f"  Saved to claude-bot/model/value_weights.json")
+    print(f"  Saved to claude-bot/model/value_weights.json", flush=True)
     return model
 
 
@@ -254,7 +272,8 @@ def _eval_ladder(n_games: int, n_workers: int = 1) -> float:
     spec = _ilu.spec_from_file_location("eval_mod2", _eval_path)
     mod = _ilu.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    results = mod.ladder(n_games, "claude_bot", base_seed=99999, n_workers=n_workers)
+    # Force n_workers=1: dynamically-loaded module can't be pickled for spawn workers
+    results = mod.ladder(n_games, "claude_bot", base_seed=99999, n_workers=1)
     return mod.ladder_score(results)
 
 
@@ -342,6 +361,8 @@ if __name__ == "__main__":
                         help="Snapshot features every N turns (heuristic mode only)")
     parser.add_argument("--ismcts",         action="store_true",
                         help="Collect training data from ISMCTS games (correct distribution)")
+    parser.add_argument("--iter",           type=int, default=20,
+                        help="ISMCTS iterations per decision during data collection (lower=faster)")
     parser.add_argument("--pool",           action="store_true",
                         help="Run Stage 5 population pool training (implies --ismcts, --rounds>1)")
     parser.add_argument("--eval-games",     type=int, default=10,
@@ -368,7 +389,7 @@ if __name__ == "__main__":
                   use_ismcts=args.ismcts)
     else:
         model = train(args.games, args.model, getattr(args, "sample_every", 3),
-                      use_ismcts=args.ismcts)
+                      use_ismcts=args.ismcts, n_iter=args.iter)
 
     if args.eval > 0:
         print(f"\n=== Post-training eval ({args.eval} games vs fish_bot) ===")
