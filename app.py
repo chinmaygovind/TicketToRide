@@ -1385,11 +1385,13 @@ def on_keep_initial_tickets(data):
         return
 
     state = game.state
+    offered = list(state["player_states"].get(str(player.id), {}).get("pending_tickets", []))
     result = logic.keep_initial_tickets(state, str(player.id), keep_ids)
     if not result["ok"]:
         emit("error", {"message": result["error"]})
         return
 
+    _log_ticket_decision(state, str(player.id), offered, keep_ids, is_bot=False)
     game.state = state
     db.session.commit()
     _broadcast_state(game, code)
@@ -1427,7 +1429,15 @@ def on_draw_destination_tickets(data):
 def on_keep_drawn_tickets(data):
     code = data.get("code", "").upper()
     keep_ids = data.get("keep_ids", [])
-    _player_action(code, lambda state, pid: logic.keep_drawn_tickets(state, pid, keep_ids))
+
+    def _act(state, pid):
+        offered = list(state["player_states"].get(pid, {}).get("pending_tickets", []))
+        r = logic.keep_drawn_tickets(state, pid, keep_ids)
+        if r.get("ok"):
+            _log_ticket_decision(state, pid, offered, keep_ids, is_bot=False)
+        return r
+
+    _player_action(code, _act)
 
 
 @socketio.on("resolve_tunnel")
@@ -1714,6 +1724,53 @@ def _bot_decide(bot_module, state, pid, personality):
         return bot_module.bot_turn(state, pid, personality)
 
 
+# Bot build tag — bump when shitter/claude bot logic changes so accumulated human
+# games can be A/B'd by version. Stamped onto every bot ticket decision below.
+BOT_BUILD = os.environ.get("BOT_BUILD", "shitter-2026-06-26-overlap-continuity")
+
+
+def _log_ticket_decision(state, pid, offered, kept, is_bot=False, bot_type=None):
+    """Record a ticket-selection decision into state['ticket_decisions'].
+
+    Captures what was OFFERED, what was kept, and crucially what was REJECTED,
+    plus the decision context (hand, trains, turn, network size). The replay log
+    never stored ticket choices, so rejected tickets — the key signal for learning
+    human ticket selection — were invisible. Persists inside state_json (the caller
+    saves game.state afterward); best-effort, never breaks the turn on error.
+    """
+    try:
+        offered = [int(t) for t in offered]
+        if not offered:
+            return
+        kept_set = {int(t) for t in kept}
+        ps = state["player_states"].get(pid, {})
+        _, ticket_by_id, _, _ = logic._map_data(state.get("map", "usa"))
+
+        def _tk(tid):
+            t = ticket_by_id.get(tid, {})
+            return {"id": tid, "start": t.get("city1"), "end": t.get("city2"),
+                    "points": t.get("points")}
+
+        state.setdefault("ticket_decisions", []).append({
+            "pid": pid,
+            "name": ps.get("name"),
+            "is_bot": bool(is_bot),
+            "bot_type": bot_type,
+            "build": BOT_BUILD if is_bot else None,
+            "phase": state.get("phase"),
+            "turn": state.get("turns_taken", 0),
+            "trains": ps.get("trains"),
+            "hand": dict(ps.get("hand", {})),
+            "n_owned_routes": sum(1 for o in state.get("claimed_routes", {}).values() if o == pid),
+            "n_tickets_held": len(ps.get("tickets", [])),
+            "offered":  [_tk(t) for t in offered],
+            "kept":     [_tk(t) for t in offered if t in kept_set],
+            "rejected": [_tk(t) for t in offered if t not in kept_set],
+        })
+    except Exception:
+        pass
+
+
 def _run_bots(game: Game, code: str):
     import bot as bot_module
     _no_progress = 0
@@ -1733,6 +1790,8 @@ def _run_bots(game: Game, code: str):
                 if pending:
                     personality = bot_module._extract_personality(p.session_key)
                     keep = bot_module.bot_keep_initial_tickets(state, pid, pending, personality)
+                    _log_ticket_decision(state, pid, list(pending), keep,
+                                         is_bot=True, bot_type=personality)
                     logic.keep_initial_tickets(state, pid, keep)
                     game.state = state
                     db.session.commit()
@@ -1830,6 +1889,8 @@ def _run_bots(game: Game, code: str):
                     keep = bot_module.bot_keep_initial_tickets(state, cur_pid, pending, personality)
                     if not keep:
                         keep = pending[:1]
+                    _log_ticket_decision(state, cur_pid, list(pending), keep,
+                                         is_bot=True, bot_type=personality)
                     logic.keep_drawn_tickets(state, cur_pid, keep)
                     advanced = True
                 elif _safe_draw_blind():
