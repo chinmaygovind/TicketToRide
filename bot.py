@@ -484,12 +484,13 @@ def _load_claude_agent():
 # shitter-bot: sophisticated direct policy (its own subpackage shitter-bot/)
 # ---------------------------------------------------------------------------
 
-_shitter_fn = None   # set to shitter_turn on first successful import
+_shitter_fn = None        # set to shitter_turn on first successful import
+_shitter_keep_fn = None   # set to shitter_keep on first successful import
 
 
 def _load_shitter_agent():
     """Lazily import the shitter-bot policy from the shitter-bot subfolder."""
-    global _shitter_fn
+    global _shitter_fn, _shitter_keep_fn
     if _shitter_fn is not None:
         return _shitter_fn
     try:
@@ -499,8 +500,10 @@ def _load_shitter_agent():
         mod    = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         _shitter_fn = mod.shitter_turn
+        _shitter_keep_fn = getattr(mod, "shitter_keep", False)
     except Exception:
         _shitter_fn = False
+        _shitter_keep_fn = False
     return _shitter_fn
 
 
@@ -925,9 +928,23 @@ def bot_keep_initial_tickets(state: dict, pid: str, pending: list,
     """Keep tickets based on personality."""
     route_by_id, ticket_by_id = _get_map_data(state)
 
-    # claude_bot and shitter_bot use an expected-value chooser: keep finishable /
-    # overlapping tickets, drop negative-EV dead weight. Initial phase must keep
-    # >= 2; mid-game ticket draws may keep just 1.
+    # shitter_bot has its OWN ticket chooser (overlap + continuity + cross-map
+    # value; disciplined easy-extend filter mid-game) in shitter-bot/policy.py.
+    if personality == "shitter_bot":
+        mid_game = state.get("phase") != "initial_tickets"
+        min_keep = 1 if mid_game else 2
+        _load_shitter_agent()
+        if _shitter_keep_fn:
+            try:
+                keep = _shitter_keep_fn(state, pid, pending, min_keep, mid_game)
+                if len(keep) >= min_keep:
+                    return keep
+            except Exception:
+                pass   # fall through to the EV chooser below
+
+    # claude_bot (and shitter fallback) use an expected-value chooser: keep
+    # finishable / overlapping tickets, drop negative-EV dead weight. Initial
+    # phase must keep >= 2; mid-game ticket draws may keep just 1.
     if personality in ("claude_bot", "shitter_bot"):
         min_keep = 2 if state.get("phase") == "initial_tickets" else 1
         keep = _claude_keep_tickets(state, pid, pending, ticket_by_id,

@@ -55,15 +55,30 @@ _PTS = ROUTE_SCORING          # length -> route points {1:1,2:2,3:4,4:7,5:10,6:1
 # a wasteful detour.
 _HOP_PENALTY = 0.8
 
-# Draw extra destination tickets once the network is LARGE and current tickets
-# are done. DB lesson: humans who end with 4-6 tickets score ~115 vs ~90 for 3,
-# because with a big network newly-drawn tickets are often already connected (free
-# points). But drawing costs a turn, so we only do it as a FALLBACK — when there's
-# no worthwhile route to claim anyway (we'd otherwise just draw cards) and the
-# network is big enough that a drawn ticket is very likely already connected/cheap.
-# The EV ticket chooser (bot.py) then keeps only the finishable ones.
-_DRAW_TICKET_MIN_TRAINS = 15
-_DRAW_TICKET_MIN_CITIES = 11
+# Drawing EXTRA destination tickets mid-game — ENABLED but DISCIPLINED.
+# History: a naive "draw when network is big" fallback backfired hard (you MUST
+# keep >=1 of the 3, and a fresh cross-map ticket is usually unfinishable dead
+# weight): real prod games g178 (-54 pts, scored 21) and g179 (-23, scored 62).
+# The discipline that makes it safe lives in shitter_keep_tickets(): mid-game it
+# only keeps tickets already EASILY EXTENDABLE onto the network (already connected
+# or <= _EASY_EXTEND_MAX new trains), so a drawn ticket is near-free or skipped.
+# We also only draw once the current plan is done (not owing) and the network is
+# large with trains to spare. A/B (100-120 games/opp): with the easy-extend filter
+# the blow-up games vanish and tickets-completed RISES (chin 2P 2.56->2.70), at a
+# tiny tempo cost (~1-2 games/100) that only shows in fast bot games — human-paced
+# games reward the extra completed tickets (DB: 4-6 tickets ~115 pts vs ~90 for 3).
+# Set SHITTER_DRAW_TICKETS=0 to disable.
+_DRAW_TICKET_MIN_TRAINS = int(os.environ.get("SHITTER_DRAW_MIN_TRAINS", "18"))
+_DRAW_TICKET_MIN_CITIES = int(os.environ.get("SHITTER_DRAW_MIN_CITIES", "12"))
+_DRAW_TICKETS_ENABLED   = os.environ.get("SHITTER_DRAW_TICKETS", "1") == "1"
+
+# Anti-hoarding tempo thresholds: how good a route must score before we claim it
+# (vs drawing cards) at various train levels. Lowering them spends trains earlier;
+# A/B showed no harness gain (bot opponents don't trigger the fast endgame that
+# punishes hoarding), so defaults are unchanged but kept env-tunable.
+_TEMPO_MID_TRAINS = int(os.environ.get("SHITTER_TEMPO_MID_TRAINS", "12"))
+_TEMPO_MID_THRESH = float(os.environ.get("SHITTER_TEMPO_MID_THRESH", "1.0"))
+_TEMPO_HI_THRESH  = float(os.environ.get("SHITTER_TEMPO_HI_THRESH", "4.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -251,6 +266,136 @@ def _draw_toward(face_up, focus_routes, draw_step):
 
 
 # ---------------------------------------------------------------------------
+# Ticket selection — overlap, continuity, cross-map value
+# ---------------------------------------------------------------------------
+# How a strong human picks tickets (per chinmay): choose tickets whose paths
+# OVERLAP so one corridor of long segments serves several tickets; keep them on
+# ONE continuous chain to chase the longest-path bonus; prefer high-value cross-
+# map tickets (their paths are made of long segments = most route points + LP).
+# Mid-game, only AFTER the current plan is basically done, draw more and keep only
+# tickets that are very EASILY EXTENDABLE onto the existing network.
+
+_SYNERGY_W    = float(os.environ.get("SHITTER_SYNERGY_W", "0.7"))   # value per train shared between tickets
+_CONTINUITY_W = float(os.environ.get("SHITTER_CONTINUITY_W", "0.5"))# value per new train laid on the single main chain
+_KEEP_BUDGET_FRAC = 0.85
+_EASY_EXTEND_MAX  = int(os.environ.get("SHITTER_EASY_EXTEND_MAX", "7"))  # mid-game: max new trains for a "free" keep
+
+
+def _clampf(x, lo, hi):
+    return lo if x < lo else hi if x > hi else x
+
+
+def _keep_candidates(state, pid, pending):
+    """For each pending ticket build (tid, ticket, needed_route_ids|None, new_train_cost).
+    Uses the SAME long-segment-biased pathing the policy builds with, and treats
+    already-connected tickets as free (cost 0)."""
+    claimed = state["claimed_routes"]
+    owned   = {int(r) for r, o in claimed.items() if o == pid}
+    adj     = _available_adj(state, pid)
+    out = []
+    for tid in pending:
+        t = TICKET_BY_ID.get(tid)
+        if not t:
+            continue
+        if logic.is_path_connected(state, pid, t["city1"], t["city2"]):
+            out.append((tid, t, set(), 0))                 # already done = free
+            continue
+        path = _path_route_ids(adj, t["city1"], t["city2"])
+        if path is None:
+            out.append((tid, t, None, 10 ** 9))            # unreachable
+            continue
+        need = {r for r in path if r not in owned}
+        cost = sum(ROUTE_BY_ID[r]["length"] for r in need)
+        out.append((tid, t, need, cost))
+    return out, owned
+
+
+def _eval_keep_subset(sub, owned, trains):
+    """Expected value of keeping `sub` (list of keep-candidate tuples), with a
+    synergy bonus for overlapping ticket paths and a continuity bonus for laying
+    that track as ONE chain attached to the main network (longest-path bonus)."""
+    union = set()
+    indep = 0
+    for _tid, _t, need, cost in sub:
+        if need:
+            union |= need
+            indep += cost
+    new_trains = sum(ROUTE_BY_ID[r]["length"] for r in union if r in ROUTE_BY_ID)
+
+    budget = max(1.0, trains * _KEEP_BUDGET_FRAC)
+    over   = max(0.0, new_trains - budget)
+    feas   = _clampf(0.92 - 0.9 * (over / budget), 0.35, 0.92)
+
+    ev = 0.0
+    for _tid, t, need, cost in sub:
+        pts = t.get("points", 0)
+        if need is None:
+            p = 0.02                                       # unreachable -> dead weight
+        else:
+            p = feas * _clampf(1.0 - 0.008 * cost, 0.60, 0.97)
+        ev += pts * (2.0 * p - 1.0)
+
+    # Synergy: trains the kept tickets SHARE (built once, count for several).
+    ev += _SYNERGY_W * feas * max(0, indep - new_trains)
+
+    # Continuity: of the new track, how much lands on the SINGLE largest network
+    # component (owned + planned). Track that chains onto one continuous line is
+    # worth more (feeds the longest-path bonus) than the same track split into
+    # disconnected islands.
+    if union:
+        owned_edges = [(ROUTE_BY_ID[r]["city1"], ROUTE_BY_ID[r]["city2"])
+                       for r in owned if r in ROUTE_BY_ID]
+        plan_edges  = [(ROUTE_BY_ID[r]["city1"], ROUTE_BY_ID[r]["city2"])
+                       for r in union if r in ROUTE_BY_ID]
+        root = _component_root(owned_edges + plan_edges)
+        comp_len = {}
+        for r in (owned | union):
+            rr = ROUTE_BY_ID.get(r)
+            if not rr:
+                continue
+            cr = root.get(rr["city1"])
+            comp_len[cr] = comp_len.get(cr, 0) + rr["length"]
+        main = max(comp_len, key=comp_len.get) if comp_len else None
+        on_main = sum(ROUTE_BY_ID[r]["length"] for r in union
+                      if r in ROUTE_BY_ID and root.get(ROUTE_BY_ID[r]["city1"]) == main)
+        ev += _CONTINUITY_W * feas * on_main
+    return ev
+
+
+def shitter_keep_tickets(state, pid, pending, min_keep, mid_game):
+    """Pick the keep-subset that maximises EV+synergy+continuity (>= min_keep).
+    Mid-game, hard-filter out any ticket that is NOT already easily extendable
+    (already connected or <= _EASY_EXTEND_MAX new trains) before choosing — we
+    only ever draw mid-game when the current plan is done, so newly kept tickets
+    must be near-free, never speculative cross-map dead weight."""
+    import itertools
+    cand, owned = _keep_candidates(state, pid, pending)
+    if not cand:
+        return list(pending[:min_keep])
+    trains = state["player_states"].get(pid, {}).get("trains", 45)
+
+    if mid_game:
+        easy = [c for c in cand if c[2] is not None and c[3] <= _EASY_EXTEND_MAX]
+        if easy:
+            cand = easy                                    # only keep near-free tickets
+        else:
+            cand.sort(key=lambda c: c[3])                  # forced: keep the cheapest one
+            return [cand[0][0]]
+
+    if len(cand) <= min_keep:
+        return [c[0] for c in cand]
+
+    best, best_ev = None, None
+    idx = list(range(len(cand)))
+    for k in range(min_keep, len(cand) + 1):
+        for combo in itertools.combinations(idx, k):
+            ev = _eval_keep_subset([cand[i] for i in combo], owned, trains)
+            if best_ev is None or ev > best_ev:
+                best_ev, best = ev, combo
+    return [cand[i][0] for i in best]
+
+
+# ---------------------------------------------------------------------------
 # Public policy
 # ---------------------------------------------------------------------------
 
@@ -367,17 +512,18 @@ def shitter_policy(state, pid):
         # trains are wasted route points + longest-path track).
         if owing:
             threshold = 0.0
-        elif trains <= 12:
-            threshold = 1.0          # end-game: grab almost anything affordable
+        elif trains <= _TEMPO_MID_TRAINS:
+            threshold = _TEMPO_MID_THRESH    # end-game: grab almost anything affordable
         else:
-            threshold = 4.0          # early: don't waste good cards on junk routes
+            threshold = _TEMPO_HI_THRESH     # early: don't waste good cards on junk routes
         if best_rid is not None and best_score >= threshold:
             return "claim", {"route_id": best_rid, "cards": best_cards}
 
         # No worthwhile route to claim: if our network is large and tickets are
         # done, draw new tickets (likely already-connected free points) instead
         # of just drawing cards. This is free tempo — we weren't going to build.
-        if (not owing
+        if (_DRAW_TICKETS_ENABLED
+                and not owing
                 and trains >= _DRAW_TICKET_MIN_TRAINS
                 and len(my_cities) >= _DRAW_TICKET_MIN_CITIES
                 and len(state.get("dest_deck", [])) >= 3):
