@@ -136,6 +136,14 @@ socket.on('connect', () => {
   socket.emit('join_lobby', { code: GAME_CODE });
 });
 
+// Recovery poll: if the game starts but this client missed the game_started
+// broadcast (e.g. a momentary socket drop with no reconnect event), re-joining
+// the lobby makes the server resend game_started when the game is already playing.
+// This guarantees every player is eventually taken to the game page.
+setInterval(() => {
+  if (socket.connected) socket.emit('join_lobby', { code: GAME_CODE });
+}, 4000);
+
 socket.on('lobby_state', (data) => {
   updatePlayerList(data.players);
 });

@@ -1200,7 +1200,11 @@ def on_start_game(data):
 
     socketio.emit("game_started", {"code": code}, to=code)
     _emit_lobbies_update()
-    _run_bots(game, code)
+    # Run bots in the background so the game_started broadcast flushes immediately
+    # and every player is redirected to the game page; running bots inline here can
+    # block the eventlet hub and delay/drop that delivery, stranding players in the
+    # lobby.
+    eventlet.spawn_n(_run_bots_bg, game.id, code)
 
 
 @socketio.on("join_game_room")
@@ -1211,7 +1215,20 @@ def on_join_game_room(data):
     if not game:
         return
     player = Player.query.filter_by(game_id=game.id, session_key=sk).first()
+    if not player:
+        # The session key can drift (cookie rotated/expired/re-login) since the
+        # player first joined, which would leave this socket out of the personal
+        # room _broadcast_state targets (to=player.session_key) — so they would
+        # never receive game_state and the board renders blank. Re-resolve a
+        # logged-in player by their stable, authenticated user_id.
+        uid = session.get("user_id")
+        if uid:
+            player = Player.query.filter_by(game_id=game.id, user_id=uid).first()
     join_room(code)
+    if player:
+        # Join the room that personal game_state is actually broadcast to (keyed by
+        # the session_key stored on the row), regardless of the current cookie key.
+        join_room(player.session_key)
     state = game.state
     bot_ids = [str(p.id) for p in game.players if p.session_key.startswith("bot_")]
     host_id = next((str(p.id) for p in game.players if p.is_host), None)

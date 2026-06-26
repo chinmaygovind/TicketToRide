@@ -320,6 +320,11 @@ socket.on('connect', () => {
   socket.emit('register_session');
   if (!IS_SPECTATOR) {
     socket.emit('join_game_room', { code: GAME_CODE });
+    // Watchdog: if the personal game_state never arrives (e.g. a personal-room
+    // mismatch), the board stays blank. Re-request it until we have base state.
+    setTimeout(() => {
+      if (!gameState) socket.emit('join_game_room', { code: GAME_CODE });
+    }, 2500);
   }
 });
 
@@ -422,7 +427,13 @@ socket.on('game_state', (state) => {
 });
 
 socket.on('game_state_update', (state) => {
-  if (!gameState) return;
+  if (!gameState) {
+    // We're receiving public updates but never got our personal game_state
+    // (e.g. a personal-room mismatch after a reconnect/session change). Without
+    // the base state the board renders blank, so re-request the full state.
+    socket.emit('join_game_room', { code: GAME_CODE });
+    return;
+  }
   const oldCurrentPlayer = gameState.current_player_id;
   const oldPhase = gameState.phase;
 
