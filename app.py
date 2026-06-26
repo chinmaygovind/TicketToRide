@@ -1321,7 +1321,7 @@ def on_start_game(data):
     # and every player is redirected to the game page; running bots inline here can
     # block the eventlet hub and delay/drop that delivery, stranding players in the
     # lobby.
-    eventlet.spawn_n(_run_bots_bg, game.id, code)
+    _kickoff_bots(game, code)
 
 
 @socketio.on("join_game_room")
@@ -1689,8 +1689,18 @@ def _player_action(code: str, action_fn, react=None):
             pass
     _bot_chat_announce_endgame(game, state, code)
     # Spawn bots in background so the state update reaches the client immediately.
-    game_id = game.id
-    eventlet.spawn_n(_run_bots_bg, game_id, code)
+    _kickoff_bots(game, code)
+
+
+def _kickoff_bots(game: Game, code: str):
+    """Start the bot turns. In production this is a detached background greenlet so
+    the just-emitted state/`game_started` flushes to clients immediately. Under
+    TESTING we run synchronously: a detached greenlet would outlive the test, then
+    commit on a stale DB session (StaleDataError) and pollute later tests."""
+    if app.config.get("TESTING"):
+        _run_bots(game, code)
+    else:
+        eventlet.spawn_n(_run_bots_bg, game.id, code)
 
 
 def _run_bots_bg(game_id: int, code: str):
