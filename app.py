@@ -1110,6 +1110,123 @@ def game_page(code):
 _chat_history: dict[str, list] = {}  # game_code -> [{name, msg, ts}, …] max 100
 _online_users: dict[int, str] = {}   # user_id -> socket_sid
 
+# Bot chat reactions (see bot_chat.py). Per-game state for cooldown + once-only
+# triggers (opening line per bot, final-round panic, endgame lines).
+_bot_chat_meta: dict[str, dict] = {}
+BOT_CHAT_COOLDOWN_S   = 2.5    # min seconds between two bot lines in a game (idle/banter)
+BOT_CHAT_IDLE_CHANCE  = 0.06   # chance a normal bot turn produces idle banter
+
+
+def _is_shitter_player(p):
+    """Only shitter-bot has chat personality (per user)."""
+    return "bot_shitter_bot_" in (getattr(p, "session_key", "") or "")
+
+
+def _bot_say(code, bot_name, trigger, force=False):
+    """Post a bot chat line for `trigger` (random from bot_chat.PHRASES) into the
+    game's chat. `force` bypasses the time cooldown for reactive/event lines.
+    Best-effort: never raises into the turn loop."""
+    try:
+        import time as _t
+        import bot_chat
+        msg = bot_chat.pick(trigger)
+        if not msg:
+            return
+        meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
+        now = _t.time()
+        if not force and now - meta.get("last_ts", 0.0) < BOT_CHAT_COOLDOWN_S:
+            return
+        meta["last_ts"] = now
+        chat_msg = {"name": bot_name, "msg": msg}
+        hist = _chat_history.setdefault(code, [])
+        hist.append(chat_msg)
+        if len(hist) > 100:
+            del hist[0]
+        socketio.emit("chat_message", chat_msg, to=code)
+    except Exception:
+        pass
+
+
+def _bot_chat_announce_endgame(game, state, code):
+    """Once a game ends: the winning bot gloats, a losing bot copes, and any bot
+    that grabbed the longest-path bonus brags. Fires at most once per game."""
+    try:
+        if state.get("phase") != "ended":
+            return
+        meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
+        if meta.get("ended_said"):
+            return
+        meta["ended_said"] = True
+        scores = state.get("scores", {})
+        if not scores:
+            return
+        bots = {str(p.id): p for p in game.players if _is_shitter_player(p)}
+        if not bots:
+            return
+        winner_pid = max(scores, key=lambda pid: scores[pid].get("total", 0))
+        # longest-path brag (one bot that earned the bonus)
+        for pid, p in bots.items():
+            if scores.get(pid, {}).get("longest_path_bonus"):
+                _bot_say(code, p.name, "longest_path", force=True)
+                break
+        if winner_pid in bots:                      # a bot won -> gloat
+            _bot_say(code, bots[winner_pid].name, "win", force=True)
+        else:                                       # a human won -> a bot copes
+            any_bot = next(iter(bots.values()))
+            _bot_say(code, any_bot.name, "lose", force=True)
+    except Exception:
+        pass
+
+
+def _bot_chat_react_to_human(game, state, code, kind, route_id=None):
+    """React to a human move: salt if they blocked a bot's route; suspicion when
+    they draw tickets; panic when the final round triggers."""
+    try:
+        bots = [p for p in game.players if _is_shitter_player(p)]
+        if not bots:
+            return
+        import bot_chat
+        if kind == "claim" and route_id is not None:
+            for p in bots:
+                if bot_chat.route_on_bot_plan(state, str(p.id), route_id):
+                    _bot_say(code, p.name, "route_blocked", force=True)
+                    break
+        elif kind == "draw_tickets":
+            _bot_say(code, bots[0].name, "opp_draws_tickets")
+        # Final-round panic (whoever triggered it) — once per game.
+        if state.get("phase") == "final_round":
+            meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
+            if not meta.get("final_said"):
+                meta["final_said"] = True
+                _bot_say(code, bots[0].name, "final_round_panic", force=True)
+    except Exception:
+        pass
+
+
+def _bot_chat_opening(code, name, pid):
+    """First time a given bot takes a turn this game, it greets/trash-talks."""
+    meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
+    opened = meta.setdefault("opened", set())
+    if pid not in opened:
+        opened.add(pid)
+        _bot_say(code, name, "opening", force=True)
+
+
+def _bot_chat_after_bot_claim(code, name, state, pid, route_id, before_done):
+    """After a bot claims: celebrate a completed ticket (or all tickets), else
+    hype a long route."""
+    try:
+        import bot_chat
+        if bot_chat.completed_count(state, pid) > before_done:
+            if bot_chat.all_tickets_complete(state, pid):
+                _bot_say(code, name, "all_tickets_complete", force=True)
+            else:
+                _bot_say(code, name, "ticket_complete", force=True)
+        elif bot_chat.route_length(state, route_id) >= 5:
+            _bot_say(code, name, "big_route", force=True)
+    except Exception:
+        pass
+
 
 @socketio.on("connect")
 def on_connect():
@@ -1416,13 +1533,15 @@ def on_claim_route(data):
     code = data.get("code", "").upper()
     route_id = int(data.get("route_id", 0))
     cards = data.get("cards", {})
-    _player_action(code, lambda state, pid: logic.claim_route(state, pid, route_id, cards))
+    _player_action(code, lambda state, pid: logic.claim_route(state, pid, route_id, cards),
+                   react=lambda game, state: _bot_chat_react_to_human(game, state, code, "claim", route_id))
 
 
 @socketio.on("draw_destination_tickets")
 def on_draw_destination_tickets(data):
     code = data.get("code", "").upper()
-    _player_action(code, lambda state, pid: logic.draw_destination_tickets(state, pid))
+    _player_action(code, lambda state, pid: logic.draw_destination_tickets(state, pid),
+                   react=lambda game, state: _bot_chat_react_to_human(game, state, code, "draw_tickets"))
 
 
 @socketio.on("keep_drawn_tickets")
@@ -1523,7 +1642,7 @@ def on_send_chat(data):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _player_action(code: str, action_fn):
+def _player_action(code: str, action_fn, react=None):
     sk = get_session_key()
     game = Game.query.filter_by(code=code).first()
     if not game:
@@ -1561,6 +1680,14 @@ def _player_action(code: str, action_fn):
 
     db.session.commit()
     _broadcast_state(game, code)
+    # Bot chat reactions to this human move (block salt, ticket-draw suspicion,
+    # final-round panic) and endgame lines if the move ended the game.
+    if react:
+        try:
+            react(game, state)
+        except Exception:
+            pass
+    _bot_chat_announce_endgame(game, state, code)
     # Spawn bots in background so the state update reaches the client immediately.
     game_id = game.id
     eventlet.spawn_n(_run_bots_bg, game_id, code)
@@ -1865,6 +1992,10 @@ def _run_bots(game: Game, code: str):
                 else:
                     _safe_draw_blind()
 
+            _chatty = personality == "shitter_bot"
+            if _chatty:
+                _bot_chat_opening(code, cur_player.name, cur_pid)
+
             try:
                 action, params = _bot_decide(bot_module, state, cur_pid, personality)
             except Exception as e:
@@ -1874,9 +2005,16 @@ def _run_bots(game: Game, code: str):
             advanced = False
 
             if action == "claim":
+                before_done = None
+                if _chatty:
+                    import bot_chat as _bc
+                    before_done = _bc.completed_count(state, cur_pid)
                 result = logic.claim_route(state, cur_pid, params["route_id"], params["cards"])
                 if result.get("ok"):
                     advanced = True
+                    if before_done is not None:
+                        _bot_chat_after_bot_claim(code, cur_player.name, state, cur_pid,
+                                                  params["route_id"], before_done)
                 elif _safe_draw_blind():
                     _do_second_draw()
                     advanced = True
@@ -1898,8 +2036,13 @@ def _run_bots(game: Game, code: str):
                     advanced = True
 
             elif action == "draw_face_up":
-                result = logic.draw_face_up(state, cur_pid, params["slot"])
+                slot = params["slot"]
+                _fu = state.get("face_up", [])
+                drew_loco = 0 <= slot < len(_fu) and _fu[slot] == "locomotive"
+                result = logic.draw_face_up(state, cur_pid, slot)
                 if result.get("ok"):
+                    if drew_loco and _chatty:
+                        _bot_say(code, cur_player.name, "drew_loco")
                     _do_second_draw()
                     advanced = True
                 elif _safe_draw_blind():
@@ -1908,6 +2051,8 @@ def _run_bots(game: Game, code: str):
 
             else:  # draw_blind
                 if _safe_draw_blind():
+                    if _chatty and random.random() < BOT_CHAT_IDLE_CHANCE:
+                        _bot_say(code, cur_player.name, "idle")
                     _do_second_draw()
                     advanced = True
 
@@ -1929,6 +2074,7 @@ def _run_bots(game: Game, code: str):
             break
 
     _broadcast_state(game, code)
+    _bot_chat_announce_endgame(game, game.state, code)
 
 
 @socketio.on("register_session")
