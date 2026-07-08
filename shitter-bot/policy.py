@@ -73,12 +73,32 @@ _DRAW_TICKET_MIN_CITIES = int(os.environ.get("SHITTER_DRAW_MIN_CITIES", "12"))
 _DRAW_TICKETS_ENABLED   = os.environ.get("SHITTER_DRAW_TICKETS", "1") == "1"
 
 # Anti-hoarding tempo thresholds: how good a route must score before we claim it
-# (vs drawing cards) at various train levels. Lowering them spends trains earlier;
-# A/B showed no harness gain (bot opponents don't trigger the fast endgame that
-# punishes hoarding), so defaults are unchanged but kept env-tunable.
-_TEMPO_MID_TRAINS = int(os.environ.get("SHITTER_TEMPO_MID_TRAINS", "12"))
+# (vs drawing cards). Self-play A/B "showed no gain" from spending trains earlier —
+# but that's because bot opponents never trigger a fast endgame. Real games vs humans
+# (prod DB) told the true story: shitter ended games with ~10 trains and ~8 cards
+# unbuilt because a fast human (fishy) ended the game while it was still hoarding.
+# Fixes: build earlier (lower HI bar, higher MID-trains cutoff) AND react to an
+# opponent nearing the end (see _claim_threshold / _ENDGAME_OPP_TRAINS). Env-tunable.
+_TEMPO_MID_TRAINS = int(os.environ.get("SHITTER_TEMPO_MID_TRAINS", "15"))
 _TEMPO_MID_THRESH = float(os.environ.get("SHITTER_TEMPO_MID_THRESH", "1.0"))
-_TEMPO_HI_THRESH  = float(os.environ.get("SHITTER_TEMPO_HI_THRESH", "4.0"))
+_TEMPO_HI_THRESH  = float(os.environ.get("SHITTER_TEMPO_HI_THRESH", "2.5"))
+# When any opponent has <= this many trains the game is about to end — stop hoarding
+# and grab affordable routes now, regardless of our own train count.
+_ENDGAME_OPP_TRAINS = int(os.environ.get("SHITTER_ENDGAME_OPP_TRAINS", "7"))
+
+
+def _claim_threshold(owing, trains, opp_min_trains):
+    """Minimum route score to claim (vs draw). Drops the bar as our OWN trains
+    dwindle, and — the key fix vs fast human opponents — also when an OPPONENT is
+    nearly out of trains, since the game is about to end and unbuilt trains are just
+    wasted route points + longest-path track."""
+    if owing:
+        return 0.0                      # always advance a ticket path
+    if opp_min_trains <= _ENDGAME_OPP_TRAINS:
+        return _TEMPO_MID_THRESH        # opponent about to end it — grab anything affordable
+    if trains <= _TEMPO_MID_TRAINS:
+        return _TEMPO_MID_THRESH        # our own end-game — use our trains
+    return _TEMPO_HI_THRESH             # early — don't waste good cards on junk routes
 
 
 # ---------------------------------------------------------------------------
@@ -249,19 +269,30 @@ def _estimate_opponent_needs(state, pid):
 
 
 def _draw_toward(face_up, focus_routes, draw_step):
-    """Draw a locomotive or a colour the focus routes need; else draw blind."""
+    """Draw a locomotive or the colour the focus routes need MOST; else draw blind.
+    Colours are weighted by route length (a length-6 route needs six of its colour,
+    a length-2 only two), so the card we grab is the one that most advances an
+    affordable claim rather than just the first matching face-up card."""
     need_colors = {}
     for rid in focus_routes:
-        col = ROUTE_BY_ID[rid].get("color", "gray")
+        r = ROUTE_BY_ID.get(rid)
+        if not r:
+            continue
+        col = r.get("color", "gray")
         if col not in ("gray", "locomotive"):
-            need_colors[col] = need_colors.get(col, 0) + 1
+            need_colors[col] = need_colors.get(col, 0) + r["length"]
     if draw_step == 0:
         for i, card in enumerate(face_up):
             if card == "locomotive":
                 return "draw_face_up", {"slot": i}
+    best_i, best_need = None, 0
     for i, card in enumerate(face_up):
-        if card and card != "locomotive" and card in need_colors:
-            return "draw_face_up", {"slot": i}
+        if card and card != "locomotive":
+            need = need_colors.get(card, 0)
+            if need > best_need:
+                best_need, best_i = need, i
+    if best_i is not None:
+        return "draw_face_up", {"slot": best_i}
     return "draw_blind", {}
 
 
@@ -506,16 +537,14 @@ def shitter_policy(state, pid):
             if score > best_score:
                 best_score, best_rid, best_cards = score, rid, cards
 
-        # Owing tickets: claim any plan route. Otherwise require a worthwhile route,
-        # but drop the bar as trains dwindle so we USE our trains instead of leaving
-        # them unused (DB: winners end with ~4 trains left, losers ~18 — unused
-        # trains are wasted route points + longest-path track).
-        if owing:
-            threshold = 0.0
-        elif trains <= _TEMPO_MID_TRAINS:
-            threshold = _TEMPO_MID_THRESH    # end-game: grab almost anything affordable
-        else:
-            threshold = _TEMPO_HI_THRESH     # early: don't waste good cards on junk routes
+        # Claim if the best route clears the tempo bar. The bar drops as our trains
+        # dwindle AND when an opponent is nearly out of trains — otherwise a fast
+        # human ends the game while we sit on unbuilt trains (DB: winners end with
+        # ~4 trains left, losers ~18).
+        opp_min_trains = min(
+            (p.get("trains", 45) for opid, p in state["player_states"].items() if opid != pid),
+            default=45)
+        threshold = _claim_threshold(owing, trains, opp_min_trains)
         if best_rid is not None and best_score >= threshold:
             return "claim", {"route_id": best_rid, "cards": best_cards}
 
