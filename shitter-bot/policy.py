@@ -23,6 +23,7 @@ ticket is complete (or unreachable). That ordering is what keeps completion high
 import os
 import sys
 import heapq
+import random
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -559,3 +560,180 @@ def shitter_policy(state, pid):
             return "draw_tickets", {}
 
     return _draw_toward(face_up, closest or plan_routes, draw_step)
+
+
+# ---------------------------------------------------------------------------
+# shittér-bot (shitter_bot_2) — the rival
+# ---------------------------------------------------------------------------
+# Plays EXACTLY like shitter-bot, but quietly sabotages one target (by default
+# "fishy"). It cheats: it reads the target's PRIVATE hand + destination tickets to
+# know precisely which routes he still needs and which colours he's hunting. The
+# camouflage rule is strict — it only ever acts on that knowledge when the move
+# also looks like ordinary strong play, so nothing it does stands out:
+#   * Colour-snipe (Lever 1): only when the normal brain would draw BLIND anyway
+#     (i.e. we had no colour of our own to chase). Taking a face-up card then is a
+#     completely normal pickup; we just pick the colour that hurts the target most.
+#   * Blocking claim (Lever 2): only once OUR OWN tickets are secured (never
+#     self-sabotage), only on a fresh turn where the brain merely wanted to draw,
+#     and only for a genuinely damaging AND affordable route — the same
+#     opportunistic blocking a strong player already does, just aimed. A small
+#     random pass keeps it from being a perfect, tell-tale pattern.
+
+_SABOTAGE_TARGETS = [s.strip().lower() for s in
+                     os.environ.get("SHITTER2_TARGETS", "fish,kmit").split(",") if s.strip()]
+_SNIPE_MIN    = float(os.environ.get("SHITTER2_SNIPE_MIN", "1.0"))
+_BLOCK_MIN    = float(os.environ.get("SHITTER2_BLOCK_MIN", "6.0"))
+_BLOCK_COST_W = float(os.environ.get("SHITTER2_BLOCK_COST_W", "1.0"))
+_BLOCK_SKIP   = float(os.environ.get("SHITTER2_BLOCK_SKIP", "0.15"))
+
+
+def _find_target(state, pid):
+    """pid of the opponent we're out to get (name matches a target token), or None.
+    Ties broken toward whoever is closest to winning (score + trains spent)."""
+    best, best_score = None, -1.0
+    for opid, p in state["player_states"].items():
+        if opid == pid:
+            continue
+        name = str(p.get("name", "")).lower()
+        if any(tok in name for tok in _SABOTAGE_TARGETS):
+            sc = p.get("route_score", 0) + (45 - p.get("trains", 45))
+            if sc > best_score:
+                best_score, best = sc, opid
+    return best
+
+
+def _target_incomplete_paths(state, target):
+    """[(ticket_points, [needed_route_id, ...])] for the target's still-incomplete,
+    reachable tickets — from his ACTUAL (hidden) tickets. This is the cheat: we
+    know exactly which routes he still needs, not just a guess from the board."""
+    tps     = state["player_states"].get(target, {})
+    claimed = state["claimed_routes"]
+    adj     = _available_adj(state, target)
+    out = []
+    for tid in tps.get("tickets", []):
+        t = TICKET_BY_ID.get(tid)
+        if not t or logic.is_path_connected(state, target, t["city1"], t["city2"]):
+            continue
+        path = _path_route_ids(adj, t["city1"], t["city2"])
+        if not path:
+            continue
+        need = [rid for rid in path if str(rid) not in claimed]
+        if need:
+            out.append((t.get("points", 0), need))
+    return out
+
+
+def _target_wanted_colors(state, target):
+    """Colours the target still has to COLLECT to finish his tickets (route need
+    minus what he already hoards). Peeks at his hidden hand + tickets."""
+    thand  = state["player_states"].get(target, {}).get("hand", {})
+    wanted = {}
+    for _pts, need in _target_incomplete_paths(state, target):
+        for rid in need:
+            col = ROUTE_BY_ID[rid].get("color", "gray")
+            if col in ("gray", "locomotive"):
+                continue                      # any colour works — can't deny it
+            wanted[col] = wanted.get(col, 0.0) + ROUTE_BY_ID[rid]["length"]
+    for col in list(wanted):
+        wanted[col] = max(0.0, wanted[col] - 0.5 * thand.get(col, 0))
+    return wanted
+
+
+def _snipe_target_color(state, target, face_up):
+    """Grab the face-up card of the colour the target needs MOST, denying it to
+    him. Only called on an otherwise-blind draw, so it's free tempo and looks
+    exactly like a normal face-up pickup."""
+    wanted = _target_wanted_colors(state, target)
+    if not wanted:
+        return None
+    best_i, best_w = None, 0.0
+    for i, card in enumerate(face_up):
+        if card and card != "locomotive":
+            w = wanted.get(card, 0.0)
+            if w > best_w:
+                best_w, best_i = w, i
+    if best_i is not None and best_w >= _SNIPE_MIN:
+        return "draw_face_up", {"slot": best_i}
+    return None
+
+
+def _best_target_block(state, pid, target, hand, trains, n_players, claimed):
+    """Most damaging AFFORDABLE route on the target's ticket paths, valued net of
+    our own train cost and bonused when it also touches our network (so it reads as
+    an ordinary self-serving claim). Returns claim params, or None."""
+    need_w = {}
+    for pts, need in _target_incomplete_paths(state, target):
+        for rid in need:
+            need_w[rid] = need_w.get(rid, 0.0) + pts + ROUTE_BY_ID[rid]["length"]
+    if not need_w:
+        return None
+    sorted_hand = sorted(((c, n) for c, n in hand.items() if c != "locomotive" and n > 0),
+                         key=lambda x: -x[1])
+    locos     = hand.get("locomotive", 0)
+    my_cities = _my_cities(claimed, pid)
+    best_rid, best_cards, best_val = None, None, 0.0
+    for rid, w in need_w.items():
+        route = ROUTE_BY_ID[rid]
+        cards = _can_claim_fast(hand, route, trains, n_players, claimed, pid,
+                                sorted_hand, locos)
+        if cards is None:
+            continue
+        length = route["length"]
+        val = w - _BLOCK_COST_W * length
+        if route["city1"] in my_cities or route["city2"] in my_cities:
+            val += 3.0                         # double-duty: also grows our network
+        if length <= 2:
+            val += 1.0                         # cheap for us, still severs his plan
+        if val > best_val:
+            best_val, best_rid, best_cards = val, rid, cards
+    if best_rid is not None and best_val >= _BLOCK_MIN:
+        return {"route_id": best_rid, "cards": best_cards}
+    return None
+
+
+def _v2_owing(state, pid):
+    """Do we still owe a reachable ticket of our own? (Never sabotage while owing.)"""
+    tps = state["player_states"].get(pid, {})
+    adj = None
+    for tid in tps.get("tickets", []):
+        t = TICKET_BY_ID.get(tid)
+        if not t or logic.is_path_connected(state, pid, t["city1"], t["city2"]):
+            continue
+        if adj is None:
+            adj = _available_adj(state, pid)
+        if _path_route_ids(adj, t["city1"], t["city2"]):
+            return True
+    return False
+
+
+def shitter_policy_v2(state, pid):
+    """shittér-bot: identical to shitter-bot, with quiet, low-suspicion sabotage of
+    one target layered on top."""
+    action, params = shitter_policy(state, pid)
+    target = _find_target(state, pid)
+    if target is None:
+        return action, params                  # target not in this game — pure shitter-bot
+
+    draw_step = state.get("draw_step", 0)
+    face_up   = state["face_up"]
+
+    # Lever 2 — opportunistic blocking claim (see module note for the safety rules).
+    if (action in ("draw_blind", "draw_face_up", "draw_tickets")
+            and draw_step == 0
+            and not _v2_owing(state, pid)
+            and random.random() > _BLOCK_SKIP):
+        ps = state["player_states"].get(pid, {})
+        block = _best_target_block(state, pid, target, ps.get("hand", {}),
+                                   ps.get("trains", 45),
+                                   len(state.get("turn_order", [])),
+                                   state["claimed_routes"])
+        if block is not None:
+            return "claim", block
+
+    # Lever 1 — snipe the target's most-wanted face-up colour on an otherwise-blind draw.
+    if action == "draw_blind":
+        snipe = _snipe_target_color(state, target, face_up)
+        if snipe is not None:
+            return snipe
+
+    return action, params

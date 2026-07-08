@@ -1040,9 +1040,15 @@ def lobby(code):
     user = get_current_user()
     guest_name = session.get("guest_name") if not user else None
     import bot as bot_module
+    # Dropdown order: shitter-bot first, the shittér-bot rival last, the rest between.
+    _bt = list(bot_module.BOT_TYPES)
+    _first = [t for t in _bt if t[1] == "shitter_bot"]
+    _last  = [t for t in _bt if t[1] == "shitter_bot_2"]
+    _mid   = [t for t in _bt if t[1] not in ("shitter_bot", "shitter_bot_2")]
+    ordered_bot_types = _first + _mid + _last
     return render_template(
         "lobby.html", game=game, player=player, user=user,
-        guest_name=guest_name, bot_types=bot_module.BOT_TYPES,
+        guest_name=guest_name, bot_types=ordered_bot_types,
     )
 
 
@@ -2070,7 +2076,7 @@ def _run_bots(game: Game, code: str):
                 else:
                     _safe_draw_blind()
 
-            _chatty = personality == "shitter_bot"
+            _chatty = personality in ("shitter_bot", "shitter_bot_2")
             if _chatty:
                 _bot_chat_opening(code, cur_player.name, cur_pid)
 

@@ -32,7 +32,14 @@
         {% if player.is_host %}
         <div class="host-controls">
           <button id="start-btn" class="btn-start">Start Game</button>
-          <button id="add-bot-btn" class="btn-add-bot" title="Add a shitter-bot">+ Add Bot</button>
+          <div class="add-bot-row">
+            <select id="bot-type-select" class="bot-type-select" title="Choose a bot personality">
+              {% for display_name, slug in bot_types %}
+              <option value="{{ slug }}"{% if slug == 'shitter_bot' %} selected{% endif %}>{{ display_name }}</option>
+              {% endfor %}
+            </select>
+            <button id="add-bot-btn" class="btn-add-bot" title="Add the selected bot">+ Add Bot</button>
+          </div>
         </div>
         <div class="start-hint">Minimum 2 players required.</div>
         {% else %}
@@ -245,7 +252,9 @@ if (IS_HOST) {
     socket.emit('start_game', { code: GAME_CODE });
   });
   document.getElementById('add-bot-btn').addEventListener('click', () => {
-    socket.emit('add_bot', { code: GAME_CODE });
+    const sel = document.getElementById('bot-type-select');
+    const botType = sel ? sel.value : undefined;
+    socket.emit('add_bot', { code: GAME_CODE, bot_type: botType });
   });
 }
 

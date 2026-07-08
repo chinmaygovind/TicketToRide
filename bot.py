@@ -28,6 +28,7 @@ BOT_TYPES = [
     ("blocking-bot",  "blocking_bot"),
     ("claude-bot",    "claude_bot"),
     ("shitter-bot",   "shitter_bot"),
+    ("shittér-bot",   "shitter_bot_2"),
 ]
 
 # route length -> priority weight for long-route-focused bots
@@ -486,11 +487,12 @@ def _load_claude_agent():
 
 _shitter_fn = None        # set to shitter_turn on first successful import
 _shitter_keep_fn = None   # set to shitter_keep on first successful import
+_shitter2_fn = None       # set to shitter2_turn (the shittér-bot rival) on import
 
 
 def _load_shitter_agent():
     """Lazily import the shitter-bot policy from the shitter-bot subfolder."""
-    global _shitter_fn, _shitter_keep_fn
+    global _shitter_fn, _shitter_keep_fn, _shitter2_fn
     if _shitter_fn is not None:
         return _shitter_fn
     try:
@@ -501,9 +503,11 @@ def _load_shitter_agent():
         spec.loader.exec_module(mod)
         _shitter_fn = mod.shitter_turn
         _shitter_keep_fn = getattr(mod, "shitter_keep", False)
+        _shitter2_fn = getattr(mod, "shitter2_turn", False)
     except Exception:
         _shitter_fn = False
         _shitter_keep_fn = False
+        _shitter2_fn = False
     return _shitter_fn
 
 
@@ -515,6 +519,17 @@ def _shitter_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step
     # Fallback to the fish strategy if the subpackage can't be loaded.
     return _fish_turn(state, pid, route_by_id, ticket_by_id,
                       hand, trains, draw_step, face_up, claimed)
+
+
+def _shitter2_turn(state, pid, route_by_id, ticket_by_id, hand, trains, draw_step, face_up, claimed):
+    """shittér-bot: the sabotaging rival. Falls back to plain shitter-bot (then
+    fish) if the v2 policy can't be loaded, so it always yields a legal move."""
+    _load_shitter_agent()
+    if _shitter2_fn:
+        return _shitter2_fn(state, pid, route_by_id, ticket_by_id,
+                            hand, trains, draw_step, face_up, claimed)
+    return _shitter_turn(state, pid, route_by_id, ticket_by_id,
+                         hand, trains, draw_step, face_up, claimed)
 
 
 def _load_claude_weights():
@@ -714,15 +729,19 @@ _DISPATCH = {
     "blocking_bot": _blocking_turn,
     "claude_bot":   _claude_turn,
     "shitter_bot":  _shitter_turn,
+    "shitter_bot_2": _shitter2_turn,
 }
 
 
 def _extract_personality(session_key: str) -> str:
-    """Extract personality slug from session_key like 'bot_fish_bot_<uuid>'."""
+    """Extract personality slug from session_key like 'bot_fish_bot_<uuid>'.
+    Prefers the LONGEST matching slug, so 'bot_shitter_bot_2_<uuid>' resolves to
+    'shitter_bot_2' and not the prefix 'shitter_bot'."""
+    match = None
     for _, slug in BOT_TYPES:
-        if f"bot_{slug}_" in session_key:
-            return slug
-    return "fish_bot"  # default
+        if f"bot_{slug}_" in session_key and (match is None or len(slug) > len(match)):
+            match = slug
+    return match or "fish_bot"  # default
 
 
 def bot_turn(state: dict, pid: str, personality: str = "fish_bot"):
@@ -930,7 +949,8 @@ def bot_keep_initial_tickets(state: dict, pid: str, pending: list,
 
     # shitter_bot has its OWN ticket chooser (overlap + continuity + cross-map
     # value; disciplined easy-extend filter mid-game) in shitter-bot/policy.py.
-    if personality == "shitter_bot":
+    # shitter_bot_2 (the shittér-bot rival) shares it so its ticket picks blend in.
+    if personality in ("shitter_bot", "shitter_bot_2"):
         mid_game = state.get("phase") != "initial_tickets"
         min_keep = 1 if mid_game else 2
         _load_shitter_agent()
@@ -945,7 +965,7 @@ def bot_keep_initial_tickets(state: dict, pid: str, pending: list,
     # claude_bot (and shitter fallback) use an expected-value chooser: keep
     # finishable / overlapping tickets, drop negative-EV dead weight. Initial
     # phase must keep >= 2; mid-game ticket draws may keep just 1.
-    if personality in ("claude_bot", "shitter_bot"):
+    if personality in ("claude_bot", "shitter_bot", "shitter_bot_2"):
         min_keep = 2 if state.get("phase") == "initial_tickets" else 1
         keep = _claude_keep_tickets(state, pid, pending, ticket_by_id,
                                     route_by_id, min_keep)

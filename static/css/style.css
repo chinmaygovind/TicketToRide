@@ -464,6 +464,24 @@ html, body {
 }
 .btn-add-bot:hover { background: rgba(99,102,241,0.3); transform: translateY(-2px); }
 
+/* Add-bot row: personality dropdown + button */
+.add-bot-row { display: inline-flex; align-items: stretch; gap: 0.5rem; flex-wrap: wrap; }
+.bot-type-select {
+  padding: 1rem 0.9rem;
+  background: rgba(99,102,241,0.15);
+  color: #818cf8;
+  border: 1px solid #818cf8;
+  border-radius: 8px;
+  font-family: 'Cinzel', serif;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.bot-type-select:hover { background: rgba(99,102,241,0.3); }
+.bot-type-select option { background: #1e1b2e; color: #e5e7eb; font-weight: 600; }
+
 /* Split "Add Bot" button: random + caret dropdown to pick a specific bot */
 .add-bot-split { position: relative; display: inline-flex; align-items: stretch; }
 .add-bot-split .btn-add-bot {

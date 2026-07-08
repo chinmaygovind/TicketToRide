@@ -13,7 +13,7 @@ import os
 import pytest
 
 import game_logic as logic
-from bot import bot_turn
+from bot import bot_turn, bot_keep_initial_tickets
 
 
 def _load_policy():
@@ -131,3 +131,160 @@ def test_shitter_bot_turn_is_legal_from_fresh_main_state():
             logic.keep_initial_tickets(state, pid, ps["pending_tickets"][:2])
     action, params = bot_turn(state, "1", "shitter_bot")
     assert action in ("claim", "draw_face_up", "draw_blind", "draw_tickets")
+
+
+# ---------------------------------------------------------------------------
+# shittér-bot (shitter_bot_2) — the sabotaging rival
+# ---------------------------------------------------------------------------
+
+_COLORS = ["red", "blue", "green", "yellow", "black", "white", "orange", "pink"]
+
+
+def _state_with(names, map_variant="usa"):
+    """Init a game with players named `names`, advanced to the main phase."""
+    specs = [{"id": i + 1, "name": n, "color": _COLORS[i], "turn_order": i}
+             for i, n in enumerate(names)]
+    state = logic.init_game_state(specs, map_variant)
+    for i in range(len(names)):
+        pid = str(i + 1)
+        ps = state["player_states"][pid]
+        if ps.get("pending_tickets"):
+            logic.keep_initial_tickets(state, pid, ps["pending_tickets"][:2])
+    return state
+
+
+def test_find_target_matches_fishy_by_name():
+    state = _state_with(["shittér-bot", "fishy", "chinmay"])
+    assert policy._find_target(state, "1") == "2"
+
+
+def test_find_target_none_when_no_target_present():
+    state = _state_with(["alice", "bob"])
+    assert policy._find_target(state, "1") is None
+
+
+def test_v2_is_identical_to_shitter_when_no_target():
+    # With nobody to sabotage, shittér-bot must be a byte-for-byte shitter-bot.
+    state = _state_with(["alice", "bob"])
+    assert policy.shitter_policy_v2(state, "1") == policy.shitter_policy(state, "1")
+
+
+def test_extract_personality_prefers_longer_slug():
+    import bot
+    assert bot._extract_personality("bot_shitter_bot_2_xyz") == "shitter_bot_2"
+    assert bot._extract_personality("bot_shitter_bot_xyz") == "shitter_bot"
+
+
+def test_snipe_grabs_targets_most_wanted_face_up_color():
+    state = _state_with(["shittér-bot", "fishy"])
+    state["claimed_routes"] = {}
+    state["player_states"]["2"]["hand"] = {}          # no held-card discount
+    # Find a ticket that makes fishy clearly hunt one colour (pathing is
+    # deterministic given the map, so this is stable).
+    chosen, wanted = None, None
+    for tid in policy.TICKET_BY_ID:
+        state["player_states"]["2"]["tickets"] = [tid]
+        w = policy._target_wanted_colors(state, "2")
+        if w and max(w.values()) >= 2.0:
+            chosen, wanted = tid, w
+            break
+    assert chosen is not None
+    top = max(wanted, key=wanted.get)
+    others = [c for c in _COLORS if c != top][:4]
+    face_up = [top] + others
+    action, params = policy._snipe_target_color(state, "2", face_up)
+    assert action == "draw_face_up"
+    assert face_up[params["slot"]] == top
+
+
+def test_snipe_returns_none_when_target_needs_nothing_face_up():
+    state = _state_with(["shittér-bot", "fishy"])
+    state["claimed_routes"] = {}
+    state["player_states"]["2"]["tickets"] = []        # target owes nothing
+    assert policy._snipe_target_color(state, "2", ["red", "blue", "green", "white", "black"]) is None
+
+
+def test_best_target_block_hits_a_route_on_the_targets_path():
+    state = _state_with(["shittér-bot", "fishy"])
+    state["claimed_routes"] = {}
+    state["player_states"]["1"]["tickets"] = []        # we owe nothing -> free to block
+    state["player_states"]["1"]["hand"] = {c: 6 for c in _COLORS}
+    state["player_states"]["1"]["hand"]["locomotive"] = 6
+    state["player_states"]["1"]["trains"] = 45
+    # Give fishy a high-value ticket so the block clears _BLOCK_MIN.
+    chosen, needed = None, None
+    for tid, t in policy.TICKET_BY_ID.items():
+        if t.get("points", 0) < 10:
+            continue
+        state["player_states"]["2"]["tickets"] = [tid]
+        paths = policy._target_incomplete_paths(state, "2")
+        if paths and paths[0][1]:
+            chosen = tid
+            needed = {r for _pts, need in paths for r in need}
+            break
+    assert chosen is not None
+    block = policy._best_target_block(
+        state, "1", "2", state["player_states"]["1"]["hand"],
+        45, len(state["turn_order"]), state["claimed_routes"])
+    assert block is not None
+    assert block["route_id"] in needed
+
+
+def test_v2_snipes_fishy_color_where_base_would_draw_blind():
+    # Set up a spot where plain shitter-bot has nothing to do but draw blind
+    # (no cards, no network, no owed tickets), while fishy is clearly hunting a
+    # colour that's sitting face-up. shitter-bot draws blind; shittér-bot instead
+    # snipes fishy's colour — proving the sabotage actually changes the move.
+    state = _state_with(["shittér-bot", "fishy"])
+    state["claimed_routes"] = {}
+    state["draw_step"] = 0
+    state["player_states"]["1"]["tickets"] = []        # not owing
+    state["player_states"]["1"]["hand"] = {}           # can't afford / block anything
+    state["player_states"]["2"]["hand"] = {}
+    chosen, wanted = None, None
+    for tid in policy.TICKET_BY_ID:
+        state["player_states"]["2"]["tickets"] = [tid]
+        w = policy._target_wanted_colors(state, "2")
+        if w and max(w.values()) >= 2.0:
+            chosen, wanted = tid, w
+            break
+    assert chosen is not None
+    top = max(wanted, key=wanted.get)
+    state["face_up"] = [top] + [c for c in _COLORS if c != top][:4]
+
+    assert policy.shitter_policy(state, "1") == ("draw_blind", {})
+    action, params = policy.shitter_policy_v2(state, "1")
+    assert action == "draw_face_up"
+    assert state["face_up"][params["slot"]] == top
+
+
+def test_shitter2_keep_and_turn_dispatch():
+    state = logic.init_game_state(
+        [{"id": 1, "name": "shittér-bot", "color": "red",  "turn_order": 0},
+         {"id": 2, "name": "fishy",       "color": "blue", "turn_order": 1}], "usa")
+    pending = state["player_states"]["1"]["pending_tickets"]
+    keep = bot_keep_initial_tickets(state, "1", pending, "shitter_bot_2")
+    assert len(keep) >= 2                              # uses the shitter ticket chooser
+    for pid in ("1", "2"):
+        ps = state["player_states"][pid]
+        logic.keep_initial_tickets(state, pid, ps["pending_tickets"][:2])
+    action, _ = bot_turn(state, "1", "shitter_bot_2")
+    assert action in ("claim", "draw_face_up", "draw_blind", "draw_tickets")
+
+
+def test_full_game_with_shitter2_targeting_fishy_completes():
+    # Full end-to-end: shittér-bot seats sabotage the "fishy" seat all game; the
+    # game must still complete cleanly (no illegal move / crash from the overlay).
+    try:
+        from tests.test_full_game import run_full_game
+    except ImportError:
+        from test_full_game import run_full_game
+    specs = [
+        {"id": 1, "name": "shittér-bot", "color": "red",   "turn_order": 0},
+        {"id": 2, "name": "fishy",       "color": "blue",  "turn_order": 1},
+        {"id": 3, "name": "chinmay",     "color": "green", "turn_order": 2},
+    ]
+    for _ in range(3):
+        state = run_full_game(specs, "usa", "shitter_bot_2")
+        assert state["phase"] == "ended"
+        assert state["winner_id"] in ("1", "2", "3")
