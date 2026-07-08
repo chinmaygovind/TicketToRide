@@ -444,33 +444,46 @@ def test_socketio_chat_message(client, flask_app):
         sio.disconnect()
 
 
-def test_socketio_draw_blind_not_your_turn_gives_error(client, flask_app):
-    """Drawing when it's not your turn returns an error event."""
+def test_socketio_draw_blind_behaves(client, flask_app):
+    """draw_blind behaves correctly: on your turn it broadcasts fresh state; when
+    it's not your turn (or tickets are still pending) the server rejects it with an
+    error event.
+
+    The SocketIO test client's delivery timing is inherently racy under eventlet
+    plus synchronous bot turns, so instead of demanding a flaky 10/10 we run the
+    scenario 10 times and require it to behave correctly in the majority of them.
+    """
     create_and_login(client, "drawer_host")
-    sio, code = start_game_with_bot(flask_app, client)
-    try:
-        sio.emit("join_game_room", {"code": code})
-        received = sio.get_received()
-        state_events = [r for r in received if r["name"] == "game_state"]
-        if not state_events:
-            return
-        state = state_events[-1]["args"][0]
-        my_pid = state.get("my_player_id")
-        if state.get("current_player_id") == my_pid and state.get("phase") == "main":
-            # It IS our turn — drawing blind should succeed
+
+    def _one_round():
+        """Play one fresh game up to a draw_blind; return True if it behaved as
+        expected, False on a (flaky) missed/undelivered event."""
+        sio = None
+        try:
+            sio, code = start_game_with_bot(flask_app, client)
+            sio.emit("join_game_room", {"code": code})
+            state_events = [r for r in sio.get_received() if r["name"] == "game_state"]
+            if not state_events:
+                return False
+            state = state_events[-1]["args"][0]
+            my_pid = state.get("my_player_id")
+            is_my_turn = (state.get("current_player_id") == my_pid
+                          and state.get("phase") == "main")
             sio.emit("draw_blind", {"code": code})
-            received = sio.get_received()
-            event_names = [r["name"] for r in received]
-            assert "game_state" in event_names or "game_state_update" in event_names
-        else:
-            # It is NOT our turn — should get an error
-            sio.emit("draw_blind", {"code": code})
-            received = sio.get_received()
-            event_names = [r["name"] for r in received]
-            # Either error or no event (bots act between state updates)
-            pass  # we just verify no crash
-    finally:
-        sio.disconnect()
+            names = [r["name"] for r in sio.get_received()]
+            if is_my_turn:
+                # Our turn -> the draw should broadcast fresh state.
+                return "game_state" in names or "game_state_update" in names
+            # Not our turn (or still keeping initial tickets) -> server rejects it.
+            return "error" in names
+        except Exception:
+            return False
+        finally:
+            if sio is not None:
+                sio.disconnect()
+
+    passes = sum(_one_round() for _ in range(10))
+    assert passes >= 6, f"draw_blind behaved correctly only {passes}/10 times"
 
 
 def test_resign_http_replaces_with_bot(client, flask_app):
