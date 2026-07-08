@@ -21,6 +21,9 @@ let lastKnownActionLogEntry = '';
 let prevClaimedCount = 0;
 let pendingBlindDraw = null; // hand snapshot taken before a blind draw, cleared after animation
 let _sweepInProgress = false; // true while 3-loco sweep animation is running
+let _lastSweepCount = null;   // server's sweep_count last seen; a bump => play the sweep animation
+let _drawLockUntil = 0;       // timestamp (ms) until which face-up draws are blocked (post-sweep)
+let _tappedTicketId = null;   // ticket whose two cities are stuck-highlighted (mobile tap)
 
 // ─── Audio system (AudioContext-based for mobile compatibility) ───────────────
 // Settings — persisted to localStorage
@@ -272,7 +275,11 @@ const CARD_BG = {
 };
 
 // ─── Route graph for ticket path highlight ────────────────────────────────────
-
+// DEAD CODE (kept for reference): ticket hover/tap now highlights only the two
+// endpoint cities, not the shortest path between them, so buildRouteGraph /
+// ROUTE_GRAPH / shortestPath / highlightPath are no longer called. Left here
+// (commented) in case path highlighting is wanted again.
+/*
 function buildRouteGraph() {
   const adj = {};
   for (const route of BOARD_DATA.routes) {
@@ -307,6 +314,7 @@ function highlightPath(routeIds, on) {
     });
   });
 }
+*/
 
 // Player color hex map (should match server-side)
 const PLAYER_HEX = {
@@ -390,12 +398,17 @@ socket.on('game_state', (state) => {
   lastKnownActionLogEntry = (state.action_log || []).slice(-1)[0] || '';
 
   // Detect 3-loco sweep BEFORE overwriting gameState so we can capture the old face_up.
-  // game_state always arrives before game_state_update (same connection, emitted in order),
-  // so sweep animation must be triggered here or it will never fire for the active player.
+  // The server bumps sweep_count on every wipe, so this fires reliably even when a
+  // refilled card happens to match the old card in the same slot (the old slot-diff
+  // heuristic silently missed those). game_state always arrives before
+  // game_state_update, so the active player's sweep is triggered here.
   const _oldFaceUp = gameState ? [...(gameState.face_up || [])] : [];
   const _newFaceUp = state.face_up || [];
-  const _sweepChanges = _oldFaceUp.filter((c, i) => c !== _newFaceUp[i]).length;
-  const _doSweep = gameState && !_sweepInProgress && _sweepChanges >= 5 && _oldFaceUp.length === 5;
+  const _sweepCount = state.sweep_count || 0;
+  const _doSweep = gameState && !_sweepInProgress &&
+                   _lastSweepCount !== null && _sweepCount > _lastSweepCount &&
+                   _oldFaceUp.length === 5;
+  _lastSweepCount = _sweepCount;
   if (_doSweep) {
     state.face_up = _oldFaceUp; // Keep old cards visible so renderAll has something to render
   }
@@ -437,11 +450,15 @@ socket.on('game_state_update', (state) => {
   const oldCurrentPlayer = gameState.current_player_id;
   const oldPhase = gameState.phase;
 
-  // Detect 3-loco sweep: all 5 face-up slots changed simultaneously
+  // Detect 3-loco sweep via the server's sweep_count. For the active player and
+  // opponents the personal game_state (which arrives first) already bumped
+  // _lastSweepCount and started the animation, so this is a no-op for them; it's
+  // the path that drives the sweep for spectators (who only get this event).
   const oldFaceUp = gameState.face_up ? [...gameState.face_up] : [];
   const newFaceUp = state.face_up || [];
-  const numChanged = oldFaceUp.filter((c, i) => c !== newFaceUp[i]).length;
-  const isSweep = numChanged >= 5 && oldFaceUp.length === 5;
+  const sweepCount = state.sweep_count || 0;
+  const isSweep = _lastSweepCount !== null && sweepCount > _lastSweepCount && oldFaceUp.length === 5;
+  _lastSweepCount = sweepCount;
 
   gameState.claimed_routes          = state.claimed_routes;
   // Hold off updating face_up if a sweep is about to animate
@@ -606,7 +623,8 @@ function _runSweepAnimation(newFaceUp) {
     _sweepInProgress = false;
     renderFaceUpCards();
 
-    area.querySelectorAll('.train-card').forEach((card, i) => {
+    const dealt = [...area.querySelectorAll('.train-card')];
+    dealt.forEach((card, i) => {
       card.style.transition = 'none';
       card.style.transform = 'translateX(80px)';
       card.style.opacity = '0';
@@ -616,6 +634,11 @@ function _runSweepAnimation(newFaceUp) {
         card.style.opacity = '';
       }));
     });
+
+    // Keep face-up draws locked until ~1s after the fresh cards finish dealing in,
+    // so a fast click during/right after the animation can't grab the wrong card.
+    const dealDuration = 250 + Math.max(0, dealt.length - 1) * 50;
+    _drawLockUntil = Date.now() + dealDuration + 1000;
   }, exitDuration);
 }
 
@@ -1112,6 +1135,11 @@ function highlightTicketCities(city1, city2, on) {
   });
 }
 
+function clearCityHighlights() {
+  document.querySelectorAll('#board-svg .city-circle.city-highlight')
+    .forEach(c => c.classList.remove('city-highlight'));
+}
+
 function renderTickets() {
   if (!gameState) return;
   const me = gameState.players[MY_PLAYER_ID];
@@ -1138,24 +1166,42 @@ function renderTickets() {
     const completed = isTicketCompleted(t);
     const isLong = tid === longTicketId;
     const div = document.createElement('div');
-    div.className = 'ticket-item' + (completed ? ' completed' : '') + (isLong ? ' long-ticket' : '');
+    div.className = 'ticket-item' + (completed ? ' completed' : '') + (isLong ? ' long-ticket' : '')
+      + (tid === _tappedTicketId ? ' ticket-tapped' : '');
     div.innerHTML = `
       <div class="ticket-cities">
         ${escHtml(t.city1)} <span style="color:var(--text-muted);">→</span> ${escHtml(t.city2)}
         ${completed ? '<span class="ticket-check">✓</span>' : ''}
       </div>
       <div class="ticket-points">${t.points} pts</div>`;
-    const pathIds = shortestPath(t.city1, t.city2);
-    div.addEventListener('mouseenter', () => {
-      highlightTicketCities(t.city1, t.city2, true);
-      highlightPath(pathIds, true);
-    });
+    // Hover (desktop) / tap (mobile): highlight ONLY the two endpoint cities on the
+    // board — not the path between them.
+    div.addEventListener('mouseenter', () => highlightTicketCities(t.city1, t.city2, true));
     div.addEventListener('mouseleave', () => {
-      highlightTicketCities(t.city1, t.city2, false);
-      highlightPath(pathIds, false);
+      if (_tappedTicketId !== tid) highlightTicketCities(t.city1, t.city2, false);
+    });
+    div.addEventListener('click', () => {
+      const wasTapped = _tappedTicketId === tid;
+      clearCityHighlights();
+      area.querySelectorAll('.ticket-item.ticket-tapped').forEach(el => el.classList.remove('ticket-tapped'));
+      if (wasTapped) {
+        _tappedTicketId = null;
+      } else {
+        _tappedTicketId = tid;
+        div.classList.add('ticket-tapped');
+        highlightTicketCities(t.city1, t.city2, true);
+      }
     });
     area.appendChild(div);
   });
+
+  // The board SVG is rebuilt on every renderAll (clearing city classes), so
+  // re-apply the stuck (tapped) highlight after a re-render.
+  if (_tappedTicketId != null) {
+    const tt = getTicketById(_tappedTicketId);
+    if (tt) highlightTicketCities(tt.city1, tt.city2, true);
+    else _tappedTicketId = null;
+  }
 }
 
 // ─── Action log ──────────────────────────────────────────────────────────────
@@ -1291,7 +1337,7 @@ function renderActionButtons() {
 
 function onDrawFaceUp(slot, sourceEl) {
   if (!gameState) return;
-  if (_sweepInProgress) return; // block clicks while sweep animation plays
+  if (_sweepInProgress || Date.now() < _drawLockUntil) return; // blocked during & ~1s after a loco sweep
   if (hasPendingTickets()) return;
   if (gameState.current_player_id !== MY_PLAYER_ID) return;
   if (gameState.phase !== 'main' && gameState.phase !== 'final_round') return;

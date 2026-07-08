@@ -32,15 +32,7 @@
         {% if player.is_host %}
         <div class="host-controls">
           <button id="start-btn" class="btn-start">Start Game</button>
-          <div class="add-bot-split">
-            <button id="add-bot-btn" class="btn-add-bot" title="Add a random bot">+ Add Bot</button>
-            <button id="add-bot-caret" class="btn-add-bot-caret" title="Choose a specific bot" aria-haspopup="true" aria-expanded="false">▾</button>
-            <div id="add-bot-menu" class="add-bot-menu hidden">
-              {% for display_name, slug in bot_types %}
-              <button class="add-bot-menu-item" data-bot-type="{{ slug }}">{{ display_name }}</button>
-              {% endfor %}
-            </div>
-          </div>
+          <button id="add-bot-btn" class="btn-add-bot" title="Add a shitter-bot">+ Add Bot</button>
         </div>
         <div class="start-hint">Minimum 2 players required.</div>
         {% else %}
@@ -139,10 +131,35 @@ socket.on('connect', () => {
 // Recovery poll: if the game starts but this client missed the game_started
 // broadcast (e.g. a momentary socket drop with no reconnect event), re-joining
 // the lobby makes the server resend game_started when the game is already playing.
-// This guarantees every player is eventually taken to the game page.
 setInterval(() => {
   if (socket.connected) socket.emit('join_lobby', { code: GAME_CODE });
 }, 4000);
+
+// Connection-independent fallback: poll the game status over plain HTTP, which
+// keeps working even when the WebSocket is dead on a spotty connection. This is
+// what guarantees a player never gets stranded on "Waiting for the host…".
+let _navigatingToGame = false;
+async function pollGameStatus() {
+  if (_navigatingToGame) return;
+  try {
+    const r = await fetch('/api/lobby/' + GAME_CODE + '/status', { cache: 'no-store' });
+    if (!r.ok) return;
+    const data = await r.json();
+    if (data.status === 'playing') {
+      _navigatingToGame = true;
+      window.location.href = '/game/' + GAME_CODE;
+    }
+  } catch (_) {}
+}
+setInterval(pollGameStatus, 3000);
+// Also re-check the moment the tab regains focus (mobile pauses timers/sockets
+// while backgrounded, a common way to miss the start).
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    pollGameStatus();
+    if (socket.connected) socket.emit('join_lobby', { code: GAME_CODE });
+  }
+});
 
 socket.on('lobby_state', (data) => {
   updatePlayerList(data.players);
@@ -230,32 +247,6 @@ if (IS_HOST) {
   document.getElementById('add-bot-btn').addEventListener('click', () => {
     socket.emit('add_bot', { code: GAME_CODE });
   });
-
-  // Split-button dropdown: pick a specific bot type.
-  const caret = document.getElementById('add-bot-caret');
-  const menu = document.getElementById('add-bot-menu');
-  function closeBotMenu() {
-    menu.classList.add('hidden');
-    caret.setAttribute('aria-expanded', 'false');
-  }
-  caret.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const isOpen = !menu.classList.contains('hidden');
-    if (isOpen) {
-      closeBotMenu();
-    } else {
-      menu.classList.remove('hidden');
-      caret.setAttribute('aria-expanded', 'true');
-    }
-  });
-  menu.querySelectorAll('.add-bot-menu-item').forEach(item => {
-    item.addEventListener('click', (e) => {
-      e.stopPropagation();
-      socket.emit('add_bot', { code: GAME_CODE, bot_type: item.dataset.botType });
-      closeBotMenu();
-    });
-  });
-  document.addEventListener('click', () => closeBotMenu());
 }
 
 // Leave game

@@ -221,6 +221,63 @@ def test_draw_face_up_replaces_drawn_card(two_player_specs):
 
 
 # ---------------------------------------------------------------------------
+# 3-locomotive sweep (sweep_count drives the client's slide-away animation)
+# ---------------------------------------------------------------------------
+
+def test_maybe_replace_three_locos_reports_sweep():
+    # A realistic deck so the reshuffle can escape the 3-loco state.
+    deck = ["red", "blue", "green", "yellow", "black", "white"] * 4
+    face_up, swept = logic._maybe_replace_three_locos(
+        ["locomotive", "locomotive", "locomotive", "red", "blue"], deck)
+    assert swept is True
+    assert face_up.count("locomotive") < 3
+
+
+def test_maybe_replace_three_locos_no_sweep_when_under_three():
+    deck = ["red", "blue", "green"] * 4
+    face_up, swept = logic._maybe_replace_three_locos(
+        ["red", "blue", "green", "yellow", "black"], deck)
+    assert swept is False
+    assert face_up == ["red", "blue", "green", "yellow", "black"]
+
+
+def test_init_and_public_state_expose_sweep_count(two_player_specs):
+    state = make_state(two_player_specs)
+    assert state["sweep_count"] == 0
+    pub = logic.get_public_state(state, "1")
+    assert pub["sweep_count"] == 0
+
+
+def test_draw_face_up_bumps_sweep_count_on_three_locos(two_player_specs):
+    state = make_state(two_player_specs)
+    advance_to_main(state, two_player_specs)
+    pid = state["current_player_id"]
+    set_current(state, pid)
+    # Two locos face-up already, and the next card drawn from the deck is a loco,
+    # so refilling the emptied slot creates a 3rd loco -> full wipe.
+    state["face_up"] = ["red", "locomotive", "locomotive", "blue", "green"]
+    state["deck"] = ["red", "blue", "green", "yellow", "black", "white"] * 4 + ["locomotive"]
+    before = state["sweep_count"]
+    result = logic.draw_face_up(state, pid, 0)  # take the red card
+    assert result["ok"]
+    assert state["sweep_count"] == before + 1
+    assert state["face_up"].count("locomotive") < 3
+
+
+def test_draw_face_up_no_sweep_bump_on_normal_draw(two_player_specs):
+    state = make_state(two_player_specs)
+    advance_to_main(state, two_player_specs)
+    pid = state["current_player_id"]
+    set_current(state, pid)
+    state["face_up"] = ["red", "blue", "green", "yellow", "black"]
+    state["deck"] = ["white"] * 6
+    before = state["sweep_count"]
+    result = logic.draw_face_up(state, pid, 0)
+    assert result["ok"]
+    assert state["sweep_count"] == before
+
+
+# ---------------------------------------------------------------------------
 # Draw blind
 # ---------------------------------------------------------------------------
 

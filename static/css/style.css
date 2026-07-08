@@ -856,6 +856,7 @@ html, body {
 .ticket-item.failed .ticket-points { color: #ef4444; text-decoration: line-through; }
 .ticket-item.long-ticket { background: #0d1520; border-color: #1e3248; }
 .ticket-item.long-ticket.completed { border-color: #22c55e; }
+.ticket-item.ticket-tapped { border-color: var(--gold, #eab308); box-shadow: 0 0 8px rgba(234,179,8,0.5); }
 
 /* Action log — fills all remaining space, newest entries at bottom */
 .action-log-section {

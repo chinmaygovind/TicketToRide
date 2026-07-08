@@ -16,6 +16,7 @@ class User(db.Model):
     google_id = db.Column(db.String(64), unique=True, nullable=True, index=True)
     phone = db.Column(db.String(20), unique=True, nullable=True)
     notify_new_game = db.Column(db.Boolean, default=False)
+    is_bot = db.Column(db.Boolean, default=False, index=True)  # synthetic account for a bot personality
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     # Stats

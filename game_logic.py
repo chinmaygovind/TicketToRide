@@ -44,7 +44,7 @@ def init_game_state(players: list[dict], map_variant: str = "usa") -> dict:
     face_up: list[str] = []
     for _ in range(5):
         face_up.append(deck.pop())
-    face_up = _maybe_replace_three_locos(face_up, deck)
+    face_up, _ = _maybe_replace_three_locos(face_up, deck)
 
     is_europe = (map_variant == "europe")
 
@@ -118,6 +118,7 @@ def init_game_state(players: list[dict], map_variant: str = "usa") -> dict:
         "scores": {},
         "final_round_triggered_by": None,
         "turns_taken": 0,
+        "sweep_count": 0,   # bumped each 3-locomotive face-up wipe (drives client animation)
     }
     if is_europe:
         state["stations"] = {}       # {player_id: [city, ...]}
@@ -125,21 +126,27 @@ def init_game_state(players: list[dict], map_variant: str = "usa") -> dict:
     return state
 
 
-def _maybe_replace_three_locos(face_up: list[str], deck: list[str]) -> list[str]:
+def _maybe_replace_three_locos(face_up: list[str], deck: list[str]) -> tuple[list[str], bool]:
     """If 3+ locomotives are face-up, discard all five and draw five new ones.
+
+    Returns (face_up, did_sweep) — did_sweep is True if at least one full
+    replacement happened, so callers can signal the client to play the sweep
+    animation.
 
     Safety cap: if every available card is a locomotive (e.g. bots hoarded all
     non-loco cards), reshuffling will never produce a valid hand. After a few
     attempts we accept the all-loco state rather than spinning forever.
     """
+    did_sweep = False
     for _ in range(30):
         if face_up.count("locomotive") < 3:
             break
+        did_sweep = True
         deck.extend(face_up)
         random.shuffle(deck)
         n = min(5, len(deck))
         face_up = [deck.pop() for _ in range(n)]
-    return face_up
+    return face_up, did_sweep
 
 
 def _ensure_deck(state: dict):
@@ -227,9 +234,11 @@ def draw_face_up(state: dict, player_id: str, slot: int) -> dict:
         state["face_up"][slot] = state["deck"].pop()
     else:
         state["face_up"][slot] = None
-    state["face_up"] = _maybe_replace_three_locos(
+    state["face_up"], _swept = _maybe_replace_three_locos(
         [c for c in state["face_up"] if c is not None], state["deck"]
     )
+    if _swept:
+        state["sweep_count"] = state.get("sweep_count", 0) + 1
     # Re-pad to 5 slots
     while len(state["face_up"]) < 5:
         state["face_up"].append(None)
@@ -911,6 +920,7 @@ def get_public_state(state: dict, viewer_id: str) -> dict:
         "map": state.get("map", "usa"),
         "phase": state["phase"],
         "face_up": state["face_up"],
+        "sweep_count": state.get("sweep_count", 0),
         "deck_count": len(state["deck"]),
         "dest_deck_count": len(state["dest_deck"]),
         "claimed_routes": state["claimed_routes"],

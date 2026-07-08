@@ -558,3 +558,139 @@ def test_friend_request_nonexistent(client, registered_user):
     resp = client.post("/friends/request", json={"username": "doesnotexist_xyz"})
     data = json.loads(resp.data)
     assert not data["ok"]
+
+
+# ---------------------------------------------------------------------------
+# Bot ELO — bots have their own persistent rating, scored vs the other players
+# ---------------------------------------------------------------------------
+
+def _finished_game(db, code, seats, scores, winner_key):
+    """Build a finished-game (Game + Players + ended state) for _finalize_game_stats.
+
+    seats: list of dicts {key, user_id, name, color, is_host}.
+    scores/winner_key: keyed by the same `key`; keys map to str(player.id).
+    Returns (game, {key: str(player.id)}).
+    """
+    from models import Game, Player
+    game = Game(code=code, status="playing", map_variant="usa", state_json="{}")
+    db.session.add(game)
+    db.session.commit()
+    key_to_pid = {}
+    for i, s in enumerate(seats):
+        p = Player(game_id=game.id, user_id=s["user_id"], session_key=f"sess_{code}_{i}",
+                   name=s["name"], color=s["color"], turn_order=i, is_host=s.get("is_host", False))
+        db.session.add(p)
+        db.session.commit()
+        key_to_pid[s["key"]] = str(p.id)
+    state = {
+        "phase": "ended",
+        "winner_id": key_to_pid[winner_key],
+        "scores": {key_to_pid[k]: {"total": v} for k, v in scores.items()},
+        "player_states": {key_to_pid[k]: {"trains": 3, "tickets": [1]} for k in scores},
+    }
+    game.state = state
+    db.session.commit()
+    return game, key_to_pid
+
+
+def test_get_bot_user_creates_and_is_idempotent(flask_app, clean_database):
+    from app import _get_bot_user
+    with flask_app.app_context():
+        u = _get_bot_user("shitter_bot")
+        assert u is not None and u.is_bot is True and u.elo == 1000
+        assert u.username == "bot:shitter_bot"
+        again = _get_bot_user("shitter_bot")
+        assert again.id == u.id  # same account, not a duplicate
+
+
+def test_bot_earns_elo_and_is_excluded_from_leaderboard(flask_app, clean_database):
+    from app import db, _get_bot_user, _finalize_game_stats
+    from models import User
+    with flask_app.app_context():
+        human = User(username="alice", email="alice@x.com", elo=1000)
+        db.session.add(human)
+        db.session.commit()
+        bot = _get_bot_user("shitter_bot")
+        game, keys = _finished_game(
+            db, "ELOA",
+            [{"key": "h", "user_id": human.id, "name": "alice", "color": "red", "is_host": True},
+             {"key": "b", "user_id": bot.id, "name": "shitter-bot", "color": "blue"}],
+            scores={"h": 40, "b": 90}, winner_key="b")
+        _finalize_game_stats(game, game.state)
+        db.session.refresh(human)
+        db.session.refresh(bot)
+        assert bot.elo > 1000 and bot.games_played == 1 and bot.games_won == 1
+        assert human.elo < 1000 and human.games_played == 1 and human.games_won == 0
+        # Leaderboard is humans-only.
+        lb = User.query.filter(User.games_played > 0, User.is_bot.isnot(True)).all()
+        assert human in lb and bot not in lb
+
+
+def test_two_bots_share_user_and_aggregate_once(flask_app, clean_database):
+    from app import db, _get_bot_user, _finalize_game_stats
+    from models import User, GameResult
+    with flask_app.app_context():
+        human = User(username="alice", email="alice@x.com", elo=1000)
+        db.session.add(human)
+        db.session.commit()
+        bot = _get_bot_user("shitter_bot")   # both bot seats link to this one account
+        game, keys = _finished_game(
+            db, "DUP1",
+            [{"key": "h", "user_id": human.id, "name": "alice", "color": "red", "is_host": True},
+             {"key": "b1", "user_id": bot.id, "name": "shitter-bot", "color": "blue"},
+             {"key": "b2", "user_id": bot.id, "name": "shitter-bot", "color": "green"}],
+            scores={"h": 30, "b1": 80, "b2": 50}, winner_key="b1")
+        _finalize_game_stats(game, game.state)
+        db.session.refresh(bot)
+        assert bot.games_played == 1        # one game, not two, despite two seats
+        assert bot.games_won == 1
+        assert bot.total_points == 80 + 50  # points summed across its seats
+        results = GameResult.query.filter_by(user_id=bot.id).all()
+        assert len(results) == 1 and results[0].placement == 1  # best of its seats
+
+
+def test_finalize_opponent_names(flask_app, clean_database):
+    from app import db, _get_bot_user, _finalize_game_stats
+    from models import User, GameResult
+    with flask_app.app_context():
+        human = User(username="alice_acct", email="alice@x.com", elo=1000)
+        db.session.add(human)
+        db.session.commit()
+        bot = _get_bot_user("shitter_bot")
+        # Human's in-game name deliberately differs from the account username.
+        game, keys = _finished_game(
+            db, "OPP1",
+            [{"key": "h", "user_id": human.id, "name": "AliceInGame", "color": "red", "is_host": True},
+             {"key": "b", "user_id": bot.id, "name": "shitter-bot", "color": "blue"}],
+            scores={"h": 70, "b": 40}, winner_key="h")
+        _finalize_game_stats(game, game.state)
+        # Human's record lists the bot by display name (not the internal "bot:slug").
+        hr = GameResult.query.filter_by(user_id=human.id).first()
+        assert json.loads(hr.opponents)[0]["name"] == "shitter-bot"
+        # Bot's record lists the human by account username (not the in-game name).
+        br = GameResult.query.filter_by(user_id=bot.id).first()
+        assert json.loads(br.opponents)[0]["name"] == "alice_acct"
+
+
+def test_add_bot_defaults_to_shitter_and_links_user(client, flask_app):
+    create_and_login(client, "shitter_host")
+    data = http_create_game(client)
+    code = data["code"]
+    sio = make_sio(flask_app, client)
+    try:
+        sio.emit("join_lobby", {"code": code})
+        sio.get_received()
+        sio.emit("add_bot", {"code": code})   # no bot_type -> should default to shitter-bot
+        sio.get_received()
+        from models import Game
+        with flask_app.app_context():
+            game = Game.query.filter_by(code=code).first()
+            bots = [p for p in game.players if p.session_key.startswith("bot_")]
+            assert len(bots) == 1
+            assert bots[0].session_key.startswith("bot_shitter_bot_")
+            assert bots[0].name == "shitter-bot"
+            # Linked to its ELO-bearing bot account.
+            assert bots[0].user_id is not None
+            assert bots[0].linked_user is not None and bots[0].linked_user.is_bot
+    finally:
+        sio.disconnect()

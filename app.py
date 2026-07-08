@@ -116,6 +116,7 @@ with app.app_context():
         "ALTER TABLE games ADD COLUMN map_variant VARCHAR(10) DEFAULT 'usa'",
         "ALTER TABLE users ADD COLUMN phone VARCHAR(20)",
         "ALTER TABLE users ADD COLUMN notify_new_game BOOLEAN DEFAULT 0",
+        "ALTER TABLE users ADD COLUMN is_bot BOOLEAN DEFAULT 0",
         "ALTER TABLE users ADD COLUMN elo INTEGER DEFAULT 1000",
         "ALTER TABLE users ADD COLUMN games_played INTEGER DEFAULT 0",
         "ALTER TABLE users ADD COLUMN games_won INTEGER DEFAULT 0",
@@ -756,7 +757,7 @@ def replay_page(code):
 @app.route("/leaderboard")
 @require_login
 def leaderboard():
-    top = User.query.filter(User.games_played > 0)\
+    top = User.query.filter(User.games_played > 0, User.is_bot.isnot(True))\
                     .order_by(User.elo.desc())\
                     .limit(100).all()
     current_user = get_current_user()
@@ -1045,6 +1046,18 @@ def lobby(code):
     )
 
 
+@app.route("/api/lobby/<code>/status")
+def lobby_status(code):
+    """Lightweight status poll for the lobby page. Lets a client that missed the
+    game_started socket event (e.g. a dropped/spotty connection) still discover the
+    game has started and navigate to it — HTTP is far more reliable than the socket
+    when the connection is flaky."""
+    game = Game.query.filter_by(code=code.upper()).first()
+    if not game:
+        return {"status": "missing"}, 404
+    return {"status": game.status}
+
+
 @app.route("/game/<code>")
 @require_login
 def game_page(code):
@@ -1114,7 +1127,8 @@ _online_users: dict[int, str] = {}   # user_id -> socket_sid
 # triggers (opening line per bot, final-round panic, endgame lines).
 _bot_chat_meta: dict[str, dict] = {}
 BOT_CHAT_COOLDOWN_S   = 2.5    # min seconds between two bot lines in a game (idle/banter)
-BOT_CHAT_IDLE_CHANCE  = 0.06   # chance a normal bot turn produces idle banter
+BOT_CHAT_IDLE_CHANCE  = 0.03   # chance a normal bot turn produces idle banter
+BOT_CHAT_MAX_PER_GAME = 5      # hard cap on total bot chat lines per game
 
 
 def _is_shitter_player(p):
@@ -1133,10 +1147,15 @@ def _bot_say(code, bot_name, trigger, force=False):
         if not msg:
             return
         meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
+        # Hard cap: the bot barely talks — only a handful of lines per game total
+        # (applies to forced/reactive lines too, so it never exceeds the cap).
+        if meta.get("said_count", 0) >= BOT_CHAT_MAX_PER_GAME:
+            return
         now = _t.time()
         if not force and now - meta.get("last_ts", 0.0) < BOT_CHAT_COOLDOWN_S:
             return
         meta["last_ts"] = now
+        meta["said_count"] = meta.get("said_count", 0) + 1
         chat_msg = {"name": bot_name, "msg": msg}
         hist = _chat_history.setdefault(code, [])
         hist.append(chat_msg)
@@ -1204,12 +1223,13 @@ def _bot_chat_react_to_human(game, state, code, kind, route_id=None):
 
 
 def _bot_chat_opening(code, name, pid):
-    """First time a given bot takes a turn this game, it greets/trash-talks."""
+    """One greeting/trash-talk line at the start of the game (once per game, not
+    per bot — keeps the bot from spamming when several are in the lobby)."""
     meta = _bot_chat_meta.setdefault(code, {"last_ts": 0.0})
-    opened = meta.setdefault("opened", set())
-    if pid not in opened:
-        opened.add(pid)
-        _bot_say(code, name, "opening", force=True)
+    if meta.get("opened"):
+        return
+    meta["opened"] = True
+    _bot_say(code, name, "opening", force=True)
 
 
 def _bot_chat_after_bot_claim(code, name, state, pid, route_id, before_done):
@@ -1370,6 +1390,24 @@ def on_join_game_room(data):
     emit("chat_history", _chat_history.get(code, []))
 
 
+def _get_bot_user(slug: str) -> User | None:
+    """Return the persistent synthetic User backing a bot personality, creating it
+    on first use. Each personality gets one account so its ELO is tracked across
+    games. Best-effort: returns None if it can't be resolved (bot just goes
+    unranked, as before)."""
+    username = f"bot:{slug}"
+    try:
+        u = User.query.filter_by(username=username, is_bot=True).first()
+        if u is None:
+            u = User(username=username, email=f"{slug}@bots.local", is_bot=True, elo=1000)
+            db.session.add(u)
+            db.session.commit()
+        return u
+    except Exception:
+        db.session.rollback()
+        return User.query.filter_by(username=username, is_bot=True).first()
+
+
 @socketio.on("add_bot")
 def on_add_bot(data):
     code = data.get("code", "").upper()
@@ -1395,8 +1433,9 @@ def on_add_bot(data):
         emit("error", {"message": "No colors available."})
         return
 
-    # Optionally let the host pick a specific bot. Validate against BOT_TYPES;
-    # fall back to a random choice if missing/invalid.
+    # The lobby only offers shitter-bot now, so default to it. A specific bot_type
+    # is still honored if explicitly requested (other personalities stay fully
+    # functional for tests / future use).
     requested = data.get("bot_type")
     chosen = None
     if requested:
@@ -1405,9 +1444,11 @@ def on_add_bot(data):
                 chosen = (dn, sl)
                 break
     if chosen is None:
-        chosen = _random.choice(bot_module.BOT_TYPES)
+        chosen = next(((dn, sl) for dn, sl in bot_module.BOT_TYPES if sl == "shitter_bot"),
+                      bot_module.BOT_TYPES[0])
     display_name, slug = chosen
 
+    bot_user = _get_bot_user(slug)
     bot = Player(
         game_id=game.id,
         session_key=f"bot_{slug}_{uuid.uuid4()}",
@@ -1415,6 +1456,7 @@ def on_add_bot(data):
         color=available[0],
         turn_order=len(game.players),
         is_host=False,
+        user_id=bot_user.id if bot_user else None,
     )
     db.session.add(bot)
     db.session.commit()
@@ -1723,7 +1765,11 @@ def _run_bots_bg(game_id: int, code: str):
                 import bot as _bot_module
                 _personality = _bot_module._extract_personality(cur_player.session_key)
                 if _personality != "claude_bot":
-                    eventlet.sleep(_rand.uniform(1.0, 4.0))
+                    # In bigger games (4+ players) bots move fast (0.5s) so the game
+                    # doesn't drag; smaller games keep the human-like 1-4s pacing.
+                    _n_players = len(state.get("turn_order", [])) or len(game.players)
+                    _delay = 0.5 if _n_players > 3 else _rand.uniform(1.0, 4.0)
+                    eventlet.sleep(_delay)
                     game = db.session.get(Game, game_id)  # re-fetch after sleep
                     if not game:
                         return
@@ -1743,10 +1789,11 @@ def _finalize_game_stats(game: Game, state: dict):
     # Map player-state pid -> Player record
     pid_to_player = {str(p.id): p for p in game.players}
 
-    # Gather real (non-bot) players who have a linked user account
+    # Gather every player with a linked account — humans AND bots (each bot
+    # personality has its own synthetic User, so bots earn/lose ELO too).
     pid_to_user: dict[str, User] = {}
     for pid, p in pid_to_player.items():
-        if p.user_id and not p.session_key.startswith("bot_"):
+        if p.user_id:
             u = db.session.get(User, p.user_id)
             if u:
                 pid_to_user[pid] = u
@@ -1779,34 +1826,55 @@ def _finalize_game_stats(game: Game, state: dict):
             delta /= len(opponents)
         elo_deltas[pid] = round(delta)
 
-    # Apply stats updates and record match history
+    # Apply stats updates and record match history, grouped by user so a single
+    # personality occupying multiple seats (e.g. two shitter-bots) updates once.
+    agg_by_user: dict[int, dict] = {}
     for pid, user in pid_to_user.items():
         if pid not in scores:
             continue
         ps = state["player_states"].get(pid, {})
         sc = scores[pid]
+        placement = ranked_pids.index(pid) + 1
+        agg = agg_by_user.setdefault(user.id, {
+            "user": user, "delta": 0, "won": False, "trains": 0,
+            "tickets": 0, "points": 0, "best_pid": pid, "best_placement": placement,
+        })
+        agg["delta"]   += elo_deltas.get(pid, 0)
+        agg["won"]      = agg["won"] or (pid == winner_id)
+        agg["trains"]  += max(0, 45 - ps.get("trains", 45))
+        agg["tickets"] += len(ps.get("tickets", []))
+        agg["points"]  += max(0, sc.get("total", 0))
+        if placement < agg["best_placement"]:
+            agg["best_placement"] = placement
+            agg["best_pid"] = pid
+
+    for agg in agg_by_user.values():
+        user = agg["user"]
         elo_before = user.elo or 1000
         user.games_played = (user.games_played or 0) + 1
-        if pid == winner_id:
+        if agg["won"]:
             user.games_won = (user.games_won or 0) + 1
-        user.trains_placed = (user.trains_placed or 0) + max(0, 45 - ps.get("trains", 45))
-        user.tickets_drawn = (user.tickets_drawn or 0) + len(ps.get("tickets", []))
-        user.total_points  = (user.total_points or 0) + max(0, sc.get("total", 0))
-        user.elo = max(100, elo_before + elo_deltas.get(pid, 0))
+        user.trains_placed = (user.trains_placed or 0) + agg["trains"]
+        user.tickets_drawn = (user.tickets_drawn or 0) + agg["tickets"]
+        user.total_points  = (user.total_points or 0) + agg["points"]
+        user.elo = max(100, elo_before + agg["delta"])
 
-        # Record per-game result
-        placement = ranked_pids.index(pid) + 1
+        # Record per-game result. Humans show their account username (as before);
+        # bots show their in-game display name (not the internal "bot:slug").
+        best_pid = agg["best_pid"]
         opponent_list = [
-            {"name": pid_to_user[opid].username if opid in pid_to_user else pid_to_player[opid].name,
+            {"name": (pid_to_user[opid].username
+                      if (opid in pid_to_user and not pid_to_user[opid].is_bot)
+                      else pid_to_player[opid].name),
              "elo": scores[opid].get("total", 0),
              "placement": ranked_pids.index(opid) + 1}
-            for opid in ranked_pids if opid != pid
+            for opid in ranked_pids if opid != best_pid
         ]
         db.session.add(GameResult(
             user_id    = user.id,
             game_code  = game.code,
-            placement  = placement,
-            score      = sc.get("total", 0),
+            placement  = agg["best_placement"],
+            score      = scores[best_pid].get("total", 0),
             elo_before = elo_before,
             elo_after  = user.elo,
             opponents  = json_mod.dumps(opponent_list),
