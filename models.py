@@ -19,13 +19,67 @@ class User(db.Model):
     is_bot = db.Column(db.Boolean, default=False, index=True)  # synthetic account for a bot personality
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    # Stats
-    elo = db.Column(db.Integer, default=1000)
-    games_played = db.Column(db.Integer, default=0)
-    games_won = db.Column(db.Integer, default=0)
-    trains_placed = db.Column(db.Integer, default=0)
-    tickets_drawn = db.Column(db.Integer, default=0)
-    total_points = db.Column(db.Integer, default=0)
+    # ------------------------------------------------------------------
+    # Per-game stats live in their own tables now (ttr_stats here, ers_stats
+    # in the Egyptian Rat Screw app) so one account is shared across games.
+    # These numbers used to be plain columns on `users`; the physical columns
+    # are left in place (dormant) as a backup, but are no longer mapped. The
+    # properties below proxy TTR stats to the `ttr_stats` row so every existing
+    # call site (user.elo, user.games_played = ..., templates) keeps working.
+    # ------------------------------------------------------------------
+
+    def _ensure_stats(self):
+        if self.stats is None:
+            self.stats = TtrStats()
+        return self.stats
+
+    @property
+    def elo(self):
+        return self.stats.elo if self.stats else None
+
+    @elo.setter
+    def elo(self, value):
+        self._ensure_stats().elo = value
+
+    @property
+    def games_played(self):
+        return self.stats.games_played if self.stats else None
+
+    @games_played.setter
+    def games_played(self, value):
+        self._ensure_stats().games_played = value
+
+    @property
+    def games_won(self):
+        return self.stats.games_won if self.stats else None
+
+    @games_won.setter
+    def games_won(self, value):
+        self._ensure_stats().games_won = value
+
+    @property
+    def trains_placed(self):
+        return self.stats.trains_placed if self.stats else None
+
+    @trains_placed.setter
+    def trains_placed(self, value):
+        self._ensure_stats().trains_placed = value
+
+    @property
+    def tickets_drawn(self):
+        return self.stats.tickets_drawn if self.stats else None
+
+    @tickets_drawn.setter
+    def tickets_drawn(self, value):
+        self._ensure_stats().tickets_drawn = value
+
+    @property
+    def total_points(self):
+        return self.stats.total_points if self.stats else None
+
+    @total_points.setter
+    def total_points(self, value):
+        self._ensure_stats().total_points = value
 
     @property
     def elo_tier(self):
@@ -39,9 +93,10 @@ class User(db.Model):
 
     @property
     def win_rate(self):
-        if not self.games_played:
+        gp = self.games_played or 0
+        if not gp:
             return 0
-        return round(100 * self.games_won / self.games_played)
+        return round(100 * (self.games_won or 0) / gp)
 
     def set_password(self, pw):
         self.password_hash = generate_password_hash(pw)
@@ -50,6 +105,24 @@ class User(db.Model):
         if not self.password_hash:
             return False
         return check_password_hash(self.password_hash, pw)
+
+
+class TtrStats(db.Model):
+    """Ticket to Ride stats, one row per user. Split out of `users` so the
+    account (users) can be shared with the Egyptian Rat Screw app while each
+    game keeps its own stats."""
+    __tablename__ = "ttr_stats"
+
+    user_id       = db.Column(db.Integer, db.ForeignKey("users.id"), primary_key=True)
+    elo           = db.Column(db.Integer, default=1000)
+    games_played  = db.Column(db.Integer, default=0)
+    games_won     = db.Column(db.Integer, default=0)
+    trains_placed = db.Column(db.Integer, default=0)
+    tickets_drawn = db.Column(db.Integer, default=0)
+    total_points  = db.Column(db.Integer, default=0)
+
+    user = db.relationship("User", backref=db.backref("stats", uselist=False,
+                                                       cascade="all, delete-orphan"))
 
 
 class Game(db.Model):

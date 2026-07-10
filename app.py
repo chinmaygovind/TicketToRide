@@ -48,7 +48,7 @@ from flask import (Flask, render_template, request, jsonify,
                    redirect, url_for, session)
 from flask_socketio import SocketIO, join_room, leave_room, emit
 
-from models import db, Game, Player, User, GameResult, Friendship
+from models import db, Game, Player, User, GameResult, Friendship, TtrStats
 from game_data_na import ROUTES, CITIES, DESTINATION_TICKETS, PLAYER_COLORS, CARD_COLOR_HEX, BOARD_WIDTH, BOARD_HEIGHT
 from game_data_europe import (
     EUROPE_ROUTES, EUROPE_CITIES, EUROPE_DESTINATION_TICKETS,
@@ -65,6 +65,15 @@ import game_logic as logic
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=30)
+
+# Cross-subdomain single sign-on with Egyptian Rat Screw (ers.cgovind.com): with the
+# same SECRET_KEY and a cookie scoped to .cgovind.com, a login here is valid there too.
+# Set SESSION_COOKIE_DOMAIN=.cgovind.com in prod; leave unset locally.
+_cookie_domain = os.environ.get("SESSION_COOKIE_DOMAIN")
+if _cookie_domain:
+    app.config["SESSION_COOKIE_DOMAIN"] = _cookie_domain
+if os.environ.get("SESSION_COOKIE_SECURE", "").lower() in ("1", "true", "yes"):
+    app.config["SESSION_COOKIE_SECURE"] = True
 
 # Inject asset version into all templates for cache-busting
 _ASSET_VERSION = GIT_VERSION_NAME or 'dev'
@@ -125,6 +134,19 @@ with app.app_context():
         "ALTER TABLE users ADD COLUMN total_points INTEGER DEFAULT 0",
         "ALTER TABLE players ADD COLUMN user_id INTEGER REFERENCES users(id)",
         "ALTER TABLE games ADD COLUMN replay_json TEXT DEFAULT '[]'",
+        # Move per-user TTR stats out of `users` into `ttr_stats` so the account
+        # (users) can be shared with the Egyptian Rat Screw app. Additive and
+        # reversible: the old `users` stat columns are left in place as a backup
+        # and this backfill only copies users that don't already have a row.
+        ("CREATE TABLE IF NOT EXISTS ttr_stats ("
+         " user_id INTEGER PRIMARY KEY REFERENCES users(id),"
+         " elo INTEGER DEFAULT 1000, games_played INTEGER DEFAULT 0,"
+         " games_won INTEGER DEFAULT 0, trains_placed INTEGER DEFAULT 0,"
+         " tickets_drawn INTEGER DEFAULT 0, total_points INTEGER DEFAULT 0)"),
+        ("INSERT INTO ttr_stats"
+         " (user_id, elo, games_played, games_won, trains_placed, tickets_drawn, total_points)"
+         " SELECT id, elo, games_played, games_won, trains_placed, tickets_drawn, total_points"
+         " FROM users WHERE id NOT IN (SELECT user_id FROM ttr_stats)"),
     ]
     with db.engine.connect() as _conn:
         for _stmt in _migration_stmts:
@@ -757,8 +779,9 @@ def replay_page(code):
 @app.route("/leaderboard")
 @require_login
 def leaderboard():
-    top = User.query.filter(User.games_played > 0, User.is_bot.isnot(True))\
-                    .order_by(User.elo.desc())\
+    top = User.query.join(TtrStats).filter(TtrStats.games_played > 0,
+                                           User.is_bot.isnot(True))\
+                    .order_by(TtrStats.elo.desc())\
                     .limit(100).all()
     current_user = get_current_user()
     return render_template("leaderboard.html", players=top, user=current_user)
