@@ -171,18 +171,22 @@ document.getElementById('setup-btn').addEventListener('click', async () => {
   if (!username) { showSetupError('Please enter a username.'); return; }
   const btn = document.getElementById('setup-btn');
   btn.disabled = true;
-  const res = await fetch('/auth/google/setup', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ username })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    window.location.href = '/lobbies';
-  } else {
+  try {
+    const res = await fetch('/auth/google/setup', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ username })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) {
+      window.location.href = '/lobbies';
+      return;  // keep the button disabled; we're leaving the page
+    }
     showSetupError(data.error || 'Failed to set username.');
-    btn.disabled = false;
+  } catch (err) {
+    showSetupError('Network error. Please check your connection and try again.');
   }
+  btn.disabled = false;
 });
 
 document.getElementById('setup-username').addEventListener('keydown', e => {
@@ -219,29 +223,41 @@ function showError(id, msg) {
   setTimeout(() => el.classList.remove('visible'), 7000);
 }
 
+// Shared POST + button handling. Disables the button while the request is in
+// flight and ALWAYS re-enables it unless we're navigating away on success, so a
+// flaky network or a mid-deploy 502/504 (which returns HTML, not JSON) can never
+// leave the button stuck disabled with no feedback.
+async function submitForm(btnId, errorKey, url, payload) {
+  const btn = document.getElementById(btnId);
+  btn.disabled = true;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.ok) {
+      window.location.href = '/lobbies';
+      return;  // keep the button disabled; we're leaving the page
+    }
+    showError(errorKey, data.error || 'Something went wrong. Please try again.');
+  } catch (err) {
+    showError(errorKey, 'Network error. Please check your connection and try again.');
+  }
+  btn.disabled = false;
+}
+
 // Sign In
-document.getElementById('signin-btn').addEventListener('click', async () => {
+document.getElementById('signin-btn').addEventListener('click', () => {
   const identity = document.getElementById('signin-identity').value.trim();
   const password = document.getElementById('signin-password').value;
   if (!identity || !password) { showError('signin', 'Please fill in all fields.'); return; }
-  const btn = document.getElementById('signin-btn');
-  btn.disabled = true;
-  const res = await fetch('/login', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ identity, password })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    window.location.href = '/lobbies';
-  } else {
-    showError('signin', data.error || 'Sign in failed.');
-    btn.disabled = false;
-  }
+  submitForm('signin-btn', 'signin', '/login', { identity, password });
 });
 
 // Register
-document.getElementById('register-btn').addEventListener('click', async () => {
+document.getElementById('register-btn').addEventListener('click', () => {
   const username  = document.getElementById('reg-username').value.trim();
   const email     = document.getElementById('reg-email').value.trim();
   const password  = document.getElementById('reg-password').value;
@@ -250,20 +266,7 @@ document.getElementById('register-btn').addEventListener('click', async () => {
   if (!username || !email || !password) { showError('register', 'Please fill in all fields.'); return; }
   if (password !== password2) { showError('register', 'Passwords do not match.'); return; }
   if (password.length < 8) { showError('register', 'Password must be at least 8 characters.'); return; }
-  const btn = document.getElementById('register-btn');
-  btn.disabled = true;
-  const res = await fetch('/register', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ username, email, password, phone: phone || null })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    window.location.href = '/lobbies';
-  } else {
-    showError('register', data.error || 'Registration failed.');
-    btn.disabled = false;
-  }
+  submitForm('register-btn', 'register', '/register', { username, email, password, phone: phone || null });
 });
 
 // Enter key shortcuts
@@ -278,23 +281,10 @@ document.getElementById('reg-password2').addEventListener('keydown', e => {
 });
 
 // Guest play
-document.getElementById('guest-btn').addEventListener('click', async () => {
+document.getElementById('guest-btn').addEventListener('click', () => {
   const name = document.getElementById('guest-name-input').value.trim();
   if (!name) { showError('guest', 'Please enter a name.'); return; }
-  const btn = document.getElementById('guest-btn');
-  btn.disabled = true;
-  const res = await fetch('/guest', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ name })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    window.location.href = '/lobbies';
-  } else {
-    showError('guest', data.error || 'Could not continue as guest.');
-    btn.disabled = false;
-  }
+  submitForm('guest-btn', 'guest', '/guest', { name });
 });
 document.getElementById('guest-name-input').addEventListener('keydown', e => {
   if (e.key === 'Enter') document.getElementById('guest-btn').click();
