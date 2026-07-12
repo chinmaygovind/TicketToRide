@@ -134,29 +134,6 @@ html, body {
   border-color: var(--gold);
 }
 
-.player-count-select {
-  display: flex;
-  gap: 0.5rem;
-  margin-bottom: 0.5rem;
-}
-.count-btn {
-  flex: 1;
-  padding: 0.5rem;
-  background: var(--bg-dark);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-muted);
-  font-family: 'Cinzel', serif;
-  font-size: 1.1rem;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.count-btn.active, .count-btn:hover {
-  background: var(--gold);
-  border-color: var(--gold);
-  color: #000;
-}
-
 .btn-primary, .btn-secondary {
   width: 100%;
   margin-top: 1.5rem;

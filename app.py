@@ -947,7 +947,7 @@ def lobbies():
 def create_game():
     player_name = get_effective_name()
     data = request.json or {}
-    max_players = int(data.get("max_players", 6))
+    max_players = 6   # always the max; there's no lobby-size setting to choose
     is_private = bool(data.get("is_private", False))
     passcode = data.get("passcode", "").strip() if is_private else None
     map_variant = data.get("map_variant", "usa")
@@ -957,7 +957,7 @@ def create_game():
     sk = get_session_key()
     code = _make_game_code()
 
-    game = Game(code=code, max_players=max(2, min(6, max_players)),
+    game = Game(code=code, max_players=max_players,
                 is_private=is_private, passcode=passcode or None,
                 map_variant=map_variant)
     db.session.add(game)

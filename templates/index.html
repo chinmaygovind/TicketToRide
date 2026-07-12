@@ -22,12 +22,6 @@
         <div class="panel-body">
           <label>Your Name</label>
           <input type="text" id="host-name" placeholder="Enter your name" maxlength="20" autocomplete="off"/>
-          <label>Max Players</label>
-          <div class="player-count-select">
-            {% for n in range(2, 7) %}
-            <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
-            {% endfor %}
-          </div>
           <button class="btn-primary" id="host-btn">Create Game</button>
         </div>
       </div>
@@ -63,15 +57,6 @@ if (joinCode) {
   document.getElementById('join-code').value = joinCode;
 }
 
-let selectedMaxPlayers = 4;
-document.querySelectorAll('.count-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    selectedMaxPlayers = parseInt(btn.dataset.count);
-  });
-});
-
 function showError(msg) {
   const el = document.getElementById('landing-error');
   el.textContent = msg;
@@ -85,7 +70,7 @@ document.getElementById('host-btn').addEventListener('click', async () => {
   const res = await fetch('/create', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ name, max_players: selectedMaxPlayers })
+    body: JSON.stringify({ name })
   });
   const data = await res.json();
   if (data.ok) {

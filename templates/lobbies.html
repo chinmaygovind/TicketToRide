@@ -88,15 +88,6 @@
     <h2>Create New Game</h2>
 
     <div style="margin-bottom:1.2rem;">
-      <div class="create-field-label">MAX PLAYERS</div>
-      <div class="player-count-select">
-        {% for n in range(2, 7) %}
-        <button class="count-btn {% if n == 4 %}active{% endif %}" data-count="{{ n }}">{{ n }}</button>
-        {% endfor %}
-      </div>
-    </div>
-
-    <div style="margin-bottom:1.2rem;">
       <div class="create-field-label">MAP</div>
       <div class="visibility-toggle">
         <button class="vis-btn active" id="map-usa">North America</button>
@@ -164,19 +155,9 @@
 
 {% block scripts %}
 <script>
-let selectedMaxPlayers = 4;
 let isPrivate = false;
 let selectedMap = 'usa';
 let pendingJoinCode = null;
-
-// Max players selector
-document.querySelectorAll('.count-btn').forEach(btn => {
-  btn.addEventListener('click', () => {
-    document.querySelectorAll('.count-btn').forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    selectedMaxPlayers = parseInt(btn.dataset.count);
-  });
-});
 
 // Map selection
 document.getElementById('map-usa').addEventListener('click', () => setMap('usa'));
@@ -231,7 +212,7 @@ document.getElementById('create-confirm-btn').addEventListener('click', async ()
   const res = await fetch('/create', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ max_players: selectedMaxPlayers, is_private: isPrivate, passcode, map_variant: selectedMap })
+    body: JSON.stringify({ is_private: isPrivate, passcode, map_variant: selectedMap })
   });
   const data = await res.json();
   if (data.ok) {

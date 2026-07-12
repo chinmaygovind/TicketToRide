@@ -26,10 +26,8 @@ def create_and_login(client, username="player1", email=None, password="Password1
     assert resp.status_code == 200
 
 
-def http_create_game(client, max_players=4, is_private=False,
-                     passcode="", map_variant="usa"):
+def http_create_game(client, is_private=False, passcode="", map_variant="usa"):
     resp = client.post("/create", json={
-        "max_players": max_players,
         "is_private": is_private,
         "passcode": passcode,
         "map_variant": map_variant,
@@ -204,14 +202,15 @@ def test_join_private_game_correct_passcode(client, flask_app):
 
 def test_join_full_game(client, flask_app):
     create_and_login(client, "host_full")
-    data = http_create_game(client, max_players=2)
+    data = http_create_game(client)   # every game is max_players=6 now
     code = data["code"]
-    # Fill the one remaining slot
-    with flask_app.test_client() as c2:
-        c2.post("/register", json={
-            "username": "filler1", "email": "filler1@x.com", "password": "Password1!"
-        })
-        http_join_game(c2, code)
+    # Fill the 5 remaining slots
+    for i in range(5):
+        with flask_app.test_client() as c:
+            c.post("/register", json={
+                "username": f"filler{i}", "email": f"filler{i}@x.com", "password": "Password1!"
+            })
+            http_join_game(c, code)
     # One more — should be rejected
     with flask_app.test_client() as extra:
         extra.post("/register", json={
