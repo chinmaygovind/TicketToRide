@@ -605,7 +605,7 @@ def test_get_bot_user_creates_and_is_idempotent(flask_app, clean_database):
 
 def test_bot_earns_elo_and_is_excluded_from_leaderboard(flask_app, clean_database):
     from app import db, _get_bot_user, _finalize_game_stats
-    from models import User
+    from models import User, TtrStats
     with flask_app.app_context():
         human = User(username="alice", email="alice@x.com", elo=1000)
         db.session.add(human)
@@ -621,8 +621,10 @@ def test_bot_earns_elo_and_is_excluded_from_leaderboard(flask_app, clean_databas
         db.session.refresh(bot)
         assert bot.elo > 1000 and bot.games_played == 1 and bot.games_won == 1
         assert human.elo < 1000 and human.games_played == 1 and human.games_won == 0
-        # Leaderboard is humans-only.
-        lb = User.query.filter(User.games_played > 0, User.is_bot.isnot(True)).all()
+        # Leaderboard is humans-only. Mirror the /leaderboard query, which joins
+        # ttr_stats (games_played is a property on User now, not a column).
+        lb = User.query.join(TtrStats).filter(TtrStats.games_played > 0,
+                                              User.is_bot.isnot(True)).all()
         assert human in lb and bot not in lb
 
 
